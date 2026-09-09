@@ -1,0 +1,21 @@
+{% extends "pages/_publico.html" %}
+{% block title %}Jornada com Meu Anjo{% endblock %}
+{% block content %}
+<h1>Jornada com Meu Anjo</h1>
+<p class="lead">
+  Este endereço atende os avisos automáticos de pagamento enviados aos clientes
+  que geraram um PIX e ainda não concluíram a compra.
+</p>
+<p>
+  Se você recebeu uma mensagem no WhatsApp sobre um pedido, o link enviado leva
+  direto à página do seu PIX, com o QR Code e o código para copiar.
+</p>
+<p>
+  Para não receber mais avisos, responda <strong>SAIR</strong> na própria conversa
+  do WhatsApp, ou toque no botão <strong>“Não quero receber”</strong> da mensagem.
+</p>
+<p>
+  Dúvidas sobre um pedido: <a href="mailto:{{ support_email }}">{{ support_email }}</a><br>
+  <a href="/privacidade">Política de Privacidade</a>
+</p>
+{% endblock %}

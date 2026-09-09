@@ -1,0 +1,44 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<form class="card" method="post" action="/painel/configuracoes">
+  <input type="hidden" name="nonce" value="{{ nonce }}">
+  {% if errors.get('__all__') %}<p class="field-error">{{ errors['__all__'] }}</p>{% endif %}
+
+  {% for d in definitions %}
+    {% set valor = values.get(d.key, '') %}
+    {% set erro = errors.get(d.key) %}
+    {% if d.kind == 'bool' %}
+      <label class="check" for="{{ d.key }}">
+        <input type="checkbox" id="{{ d.key }}" name="{{ d.key }}" value="true"
+               {% if valor == 'true' %}checked{% endif %}>
+        {{ d.label }}
+      </label>
+      <span class="help">{{ d.help }}</span>
+    {% else %}
+      <label for="{{ d.key }}">{{ d.label }}
+        <span class="help">{{ d.help }}</span>
+      </label>
+      {% if d.kind == 'time' %}
+        <input type="time" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+               pattern="[0-2][0-9]:[0-5][0-9]" required class="{% if erro %}invalid{% endif %}">
+      {% elif d.kind == 'int' %}
+        {% set faixa = ranges.get(d.key) %}
+        <input type="number" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+               {% if faixa %}min="{{ faixa[0] }}" max="{{ faixa[1] }}"{% endif %}
+               step="1" required class="{% if erro %}invalid{% endif %}">
+      {% else %}
+        <input type="text" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+               class="{% if erro %}invalid{% endif %}">
+      {% endif %}
+    {% endif %}
+    {% if erro %}<p class="field-error">{{ erro }}</p>{% endif %}
+  {% endfor %}
+
+  <p class="muted" style="margin-top:1rem">
+    O índice do botão é a posição do botão de link no modelo (0 = primeiro).
+    Use −1 apenas se o modelo não tiver botão de link.
+  </p>
+  <p style="margin-top:1rem"><button class="btn" type="submit">Salvar</button></p>
+</form>
+{% endblock %}

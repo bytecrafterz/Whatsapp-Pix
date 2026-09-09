@@ -1,0 +1,53 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<div class="card">
+  <div class="row-actions">
+    <span class="muted">Últimos 100 webhooks recebidos.</span>
+    <a class="btn secondary" href="/painel/eventos">todos</a>
+    <a class="btn secondary" href="/painel/eventos?origem=kirvano">Kirvano</a>
+    <a class="btn secondary" href="/painel/eventos?origem=meta">Meta</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if not events %}
+    <p class="muted">Nenhum evento recebido{% if source %} da {{ source }}{% endif %}.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr><th>Quando</th><th>Origem</th><th>Evento</th><th>Pedido</th><th>Resultado</th><th>Detalhes</th></tr>
+      </thead>
+      <tbody>
+      {% for e in events %}
+        <tr>
+          <td data-rotulo="Quando" class="nowrap">{{ e.received_at|dt_sp_full }}</td>
+          <td data-rotulo="Origem">{{ e.source }}</td>
+          <td data-rotulo="Evento">{{ e.event or '—' }}</td>
+          <td data-rotulo="Pedido" class="nowrap">{{ e.sale_id or '—' }}</td>
+          <td data-rotulo="Resultado">
+            {% if e.error %}
+              <span class="badge bad">erro</span> <span class="muted">{{ e.error|truncate(80) }}</span>
+            {% else %}
+              {{ e.outcome or '—' }}
+            {% endif %}
+          </td>
+          <td data-rotulo="Detalhes">
+            <details>
+              <summary>ver JSON</summary>
+              <pre class="raw">{{ e.payload|pretty_json }}</pre>
+              {% if e.auth_debug %}
+                <p class="muted" style="margin-bottom:0">Cabeçalhos observados (apenas nomes):</p>
+                <pre class="raw">{{ e.auth_debug|pretty_json }}</pre>
+              {% endif %}
+            </details>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

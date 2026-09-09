@@ -1,0 +1,32 @@
+# pix-retention — enforces the 12-month retention promised on /privacidade.
+# Triggered by pix-retention.timer (daily); never enabled on its own.
+# Logs go to journald: `journalctl -u pix-retention -n 50`.
+[Unit]
+Description=PIX Recovery: apaga/anonimiza dados com mais de 12 meses (LGPD)
+After=network-online.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=pixapp
+Group=pixapp
+WorkingDirectory=/opt/pix-recovery
+EnvironmentFile=/etc/pix-recovery/env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/pix-recovery/.venv/bin/python scripts/purge_old_data.py
+# A purge is idempotent, so a failed run simply happens again tomorrow; retrying
+# inside the same day would only add noise.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pix-retention
+
+# --- hardening (same profile as pix-api / pix-worker) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

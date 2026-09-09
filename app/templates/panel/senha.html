@@ -1,0 +1,45 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<p class="muted">
+  Troque a senha sempre que quiser. Ela vale para este painel apenas — não muda
+  nada na Meta, na Kirvano nem no servidor.
+</p>
+
+{% if error %}
+<p class="flash bad">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/painel/senha" autocomplete="off">
+  <input type="hidden" name="nonce" value="{{ nonce }}">
+
+  <label for="senha_atual">Senha atual</label>
+  <input type="password" id="senha_atual" name="senha_atual" required
+         autocomplete="current-password">
+
+  <label for="nova_senha">Nova senha</label>
+  <input type="password" id="nova_senha" name="nova_senha" required minlength="10"
+         autocomplete="new-password">
+  <p class="muted">Pelo menos 10 caracteres. Use letras, números e símbolos.</p>
+
+  <label for="confirmar_senha">Repita a nova senha</label>
+  <input type="password" id="confirmar_senha" name="confirmar_senha" required minlength="10"
+         autocomplete="new-password">
+
+  <p><button type="submit" class="btn">Salvar nova senha</button></p>
+</form>
+
+<h2>Se esquecer a senha</h2>
+{% if using_stored %}
+<p class="muted">
+  A senha em uso é a que você definiu aqui. Se esquecer, ela pode ser apagada
+  direto no servidor, pelo terminal da Hostinger, e a senha original volta a valer.
+  Guarde a nova em um gerenciador de senhas.
+</p>
+{% else %}
+<p class="muted">
+  Você ainda está usando a senha original, definida na instalação. Ao salvar uma
+  nova, ela passa a valer no lugar dela.
+</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,42 @@
+# pix-api — FastAPI (uvicorn) behind nginx on 127.0.0.1:8000.
+# Installed by deploy/setup_server.sh, which rewrites /opt/pix-recovery if APP_DIR differs.
+# Logs go to journald: `journalctl -u pix-api -f`.
+[Unit]
+Description=PIX Recovery API (FastAPI/uvicorn)
+Documentation=https://api.jornadaanjo.cloud/health
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=pixapp
+Group=pixapp
+WorkingDirectory=/opt/pix-recovery
+# Secrets are injected by systemd (read as root before privileges are dropped),
+# so the file itself stays 0600 and pixapp never needs to read it.
+EnvironmentFile=/etc/pix-recovery/env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/pix-recovery/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+# The API is stateless: an unclean exit must never leave the site down.
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pix-api
+
+# --- hardening (nothing here needs to write outside /tmp) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

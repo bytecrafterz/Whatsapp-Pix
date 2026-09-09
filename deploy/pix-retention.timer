@@ -1,0 +1,18 @@
+# Daily trigger for pix-retention.service (the LGPD 12-month purge).
+# Enable with: systemctl enable --now pix-retention.timer
+# Inspect with: systemctl list-timers pix-retention.timer
+[Unit]
+Description=Roda a limpeza de dados antigos uma vez por dia
+
+[Timer]
+# 03:20 local time: outside the ad traffic window (the PIX bursts are daytime), so
+# the purge never competes with a webhook for the same rows.
+OnCalendar=*-*-* 03:20:00
+# A VPS that was off at 03:20 still purges on the next boot.
+Persistent=true
+# Spread the load if this ever runs next to other timers.
+RandomizedDelaySec=15min
+Unit=pix-retention.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,52 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<div class="card">
+  <h2>Adicionar número</h2>
+  <p class="muted">
+    O número é gravado nas duas formas usadas no Brasil (com e sem o 9), e qualquer
+    lembrete já agendado para ele é cancelado na hora.
+  </p>
+  <form method="post" action="/painel/descadastros">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <label for="phone">Telefone
+      <span class="help">Com DDD, por exemplo 51994697674 ou 5551994697674.</span>
+    </label>
+    <input type="tel" id="phone" name="phone" inputmode="numeric" required>
+    <p style="margin-top:0.75rem"><button class="btn" type="submit">Adicionar</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Números descadastrados</h2>
+  {% if not rows %}
+    <p class="muted">Nenhum número descadastrado.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr><th>Telefone</th><th>Origem</th><th>Observação</th><th>Quando</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td data-rotulo="Telefone" class="nowrap">{{ row.phone }}</td>
+          <td data-rotulo="Origem">{{ row.source }}</td>
+          <td data-rotulo="Observação">{{ row.note or '' }}</td>
+          <td data-rotulo="Quando" class="nowrap">{{ row.created_at|dt_sp_full }}</td>
+          <td data-rotulo="">
+            <form class="inline-form" method="post" action="/painel/descadastros/remover"
+                  onsubmit="return confirm('Voltar a enviar lembretes para {{ row.phone }}?')">
+              <input type="hidden" name="nonce" value="{{ nonce }}">
+              <input type="hidden" name="phone" value="{{ row.phone }}">
+              <button class="btn secondary" type="submit">remover</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,214 @@
+{# Customer PIX page. States: pending | paid | expired | refused | refunded |
+   chargeback | unknown (computed in app.pages.effective_state — a pending order
+   whose expiry has passed already reads as expired here).
+
+   No PII beyond the first name and the order code. All CSS is inline; the only
+   JS is the copy button and the countdown at the bottom of this file. #}
+{% extends "pages/_publico.html" %}
+
+{% block title %}Pedido {{ order.sale_id }} · Jornada com Meu Anjo{% endblock %}
+
+{% block head %}
+<style>
+  h1 { font-size: 1.35rem; margin: 0.15rem 0 0.6rem; }
+  .saudacao { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .linha-topo { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; }
+  .produto { margin: 0.2rem 0 0; }
+  .valor { font-size: 1.6rem; font-weight: 700; margin: 0.35rem 0 0; }
+  .qr { text-align: center; margin: 0.9rem 0; }
+  .qr img { width: 100%; max-width: 260px; height: auto; aspect-ratio: 1 / 1; background: #fff;
+            border: 1px solid var(--line); border-radius: 8px; padding: 8px; image-rendering: pixelated; }
+  #pix-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              font-size: 0.82rem; word-break: break-all; resize: vertical; }
+  #copiar { width: 100%; margin-top: 0.6rem; }
+  #copiar-status { display: block; margin-top: 0.4rem; min-height: 1.2em; }
+  .prazo { margin: 0.9rem 0 0; }
+  .passos { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+  .passos li { margin-bottom: 0.25rem; }
+  .acao { display: block; text-align: center; margin-top: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="linha-topo">
+    <span class="muted">Pedido {{ order.sale_id }}</span>
+    {% if state == 'pending' %}<span class="badge warn">Aguardando pagamento</span>
+    {% elif state == 'paid' %}<span class="badge ok">Pagamento confirmado</span>
+    {% elif state == 'expired' %}<span class="badge bad">PIX expirado</span>
+    {% elif state == 'refused' %}<span class="badge bad">Pagamento não aprovado</span>
+    {% elif state == 'refunded' %}<span class="badge warn">Reembolsado</span>
+    {% elif state == 'chargeback' %}<span class="badge warn">Em contestação</span>
+    {% else %}<span class="badge">Situação indefinida</span>{% endif %}
+  </div>
+
+  <p class="saudacao">Olá, {{ first_name(order.customer_name) }}!</p>
+  {% if state == 'pending' %}<h1>Seu código PIX está pronto</h1>
+  {% elif state == 'paid' %}<h1>Pagamento confirmado</h1>
+  {% elif state == 'expired' %}<h1>Este PIX expirou</h1>
+  {% elif state == 'refused' %}<h1>O pagamento não foi aprovado</h1>
+  {% elif state == 'refunded' %}<h1>Este pedido foi reembolsado</h1>
+  {% elif state == 'chargeback' %}<h1>Este pedido está em contestação</h1>
+  {% else %}<h1>Não conseguimos confirmar este pedido</h1>{% endif %}
+
+  {% if order.product_name %}<p class="produto">{{ order.product_name }}</p>{% endif %}
+  {% if order.amount_cents %}<p class="valor">{{ order.amount_cents|brl_symbol }}</p>{% endif %}
+</div>
+
+{% if state == 'pending' %}
+<div class="card">
+  <p>Abra o aplicativo do seu banco, escolha <strong>PIX</strong> e pague pelo QR Code
+     ou pelo código copia e cola.</p>
+
+  {% if qr_png_url %}
+  <div class="qr"><img src="{{ qr_png_url }}" alt="QR Code para pagar o PIX deste pedido"></div>
+  {% elif qr_fallback_url %}
+  <div class="qr"><img src="{{ qr_fallback_url }}" alt="QR Code para pagar o PIX deste pedido"></div>
+  {% endif %}
+
+  {% if order.pix_code %}
+  <label for="pix-code">Código copia e cola</label>
+  <textarea id="pix-code" rows="4" readonly spellcheck="false" aria-describedby="copiar-status">{{ order.pix_code }}</textarea>
+  <button type="button" class="btn" id="copiar">Copiar código</button>
+  <span id="copiar-status" class="muted" role="status" aria-live="polite"></span>
+  {% elif not qr_fallback_url %}
+  <p class="muted">O código deste pedido não está disponível nesta página. Responda no WhatsApp
+     ou escreva para <a href="mailto:{{ support_email }}">{{ support_email }}</a> que a gente envia outro.</p>
+  {% endif %}
+
+  {% if order.pix_expires_at %}
+  <p class="prazo">Válido até <strong>{{ order.pix_expires_at|dt_sp }}</strong><span
+     id="contagem" class="muted" data-expira="{{ expires_iso }}"></span></p>
+  {% endif %}
+
+  <ol class="passos">
+    <li>Copie o código acima (ou aponte a câmera para o QR Code).</li>
+    <li>No app do banco, escolha PIX &rsaquo; Pagar com QR Code ou Copia e cola.</li>
+    <li>Confira o valor e confirme.</li>
+  </ol>
+  <p class="muted">Se você já pagou, pode ignorar esta página: a confirmação costuma levar
+     alguns minutos.</p>
+</div>
+{% elif state == 'paid' %}
+<div class="card">
+  <p>Recebemos a confirmação do seu pagamento{% if order.paid_at %} em
+     <strong>{{ order.paid_at|dt_sp_full }}</strong>{% endif %}. Você não precisa fazer mais nada.</p>
+  <p class="muted">Dúvidas sobre o acesso? Responda no WhatsApp ou escreva para
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+</div>
+{% elif state == 'expired' %}
+<div class="card">
+  <p>O prazo para pagar este código terminou{% if order.pix_expires_at %} em
+     <strong>{{ order.pix_expires_at|dt_sp_full }}</strong>{% endif %}. Gerar um novo PIX leva alguns segundos.</p>
+  {% if new_pix_url %}
+  <a class="btn acao" href="{{ new_pix_url }}" rel="noopener noreferrer">Gerar novo PIX</a>
+  {% else %}
+  <p>Para gerar um novo código, escreva para
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a> ou responda no WhatsApp.</p>
+  {% endif %}
+  <p class="muted">Se você já pagou este pedido, ignore esta página — se a confirmação não
+     chegar, fale com a gente.</p>
+</div>
+{% elif state == 'refused' %}
+<div class="card">
+  <p>O pagamento deste pedido não foi aprovado. Nenhum valor foi cobrado de você.</p>
+  {% if new_pix_url %}
+  <a class="btn acao" href="{{ new_pix_url }}" rel="noopener noreferrer">Gerar novo PIX</a>
+  {% endif %}
+  <p class="muted">Precisa de ajuda? Escreva para
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a> ou responda no WhatsApp.</p>
+</div>
+{% elif state == 'refunded' %}
+<div class="card">
+  <p>Este pedido foi reembolsado. O valor volta para a sua conta pelo mesmo caminho do
+     pagamento, no prazo do seu banco.</p>
+  <p class="muted">Dúvidas sobre o reembolso? Escreva para
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+</div>
+{% elif state == 'chargeback' %}
+<div class="card">
+  <p>Este pedido está em contestação junto ao banco. Enquanto a análise não termina, não é
+     preciso fazer nada por aqui.</p>
+  <p class="muted">Se a contestação não foi você quem abriu, escreva para
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+</div>
+{% else %}
+<div class="card">
+  <p>Não conseguimos confirmar a situação deste pedido agora. Se você acabou de pagar,
+     aguarde alguns minutos e atualize a página.</p>
+  <p class="muted">Se preferir, escreva para
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a> com o número do pedido
+     {{ order.sale_id }}.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if state == 'pending' and order.pix_code %}
+<script>
+// Copy button + expiry countdown. Vanilla JS on purpose: no external assets are
+// allowed on the customer-facing pages, and the page must still pay without JS
+// (the code sits in a selectable textarea).
+(function () {
+  var botao = document.getElementById('copiar');
+  var campo = document.getElementById('pix-code');
+  var aviso = document.getElementById('copiar-status');
+
+  if (botao && campo) {
+    var rotulo = botao.textContent;
+    var timer = null;
+    function copiado() {
+      botao.textContent = 'Copiado!';
+      if (aviso) { aviso.textContent = 'Código copiado. Cole no app do seu banco.'; }
+      if (timer) { clearTimeout(timer); }
+      timer = setTimeout(function () { botao.textContent = rotulo; }, 4000);
+    }
+    // Fallback for browsers without the async clipboard API (or without a secure
+    // context): select the textarea and use the legacy execCommand('copy').
+    function copiaAntiga() {
+      try {
+        campo.focus();
+        campo.select();
+        campo.setSelectionRange(0, campo.value.length);
+        if (document.execCommand && document.execCommand('copy')) { copiado(); return; }
+      } catch (e) { /* fall through to the manual instruction below */ }
+      if (aviso) { aviso.textContent = 'Não deu para copiar sozinho: selecione o código acima e copie.'; }
+    }
+    botao.addEventListener('click', function () {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(campo.value).then(copiado, copiaAntiga);
+      } else {
+        copiaAntiga();
+      }
+    });
+  }
+
+  var contagem = document.getElementById('contagem');
+  var iso = contagem ? contagem.getAttribute('data-expira') : null;
+  var fim = iso ? new Date(iso).getTime() : NaN;
+  if (contagem && !isNaN(fim)) {
+    var passo = function () {
+      var resta = fim - Date.now();
+      if (resta <= 0) {
+        contagem.textContent = ' · o prazo terminou, atualize a página';
+        clearInterval(id);
+        return;
+      }
+      var s = Math.floor(resta / 1000);
+      var d = Math.floor(s / 86400); s -= d * 86400;
+      var h = Math.floor(s / 3600); s -= h * 3600;
+      var m = Math.floor(s / 60); s -= m * 60;
+      var texto;
+      if (d > 0) { texto = d + 'd ' + h + 'h'; }
+      else if (h > 0) { texto = h + 'h ' + m + 'min'; }
+      else if (m > 0) { texto = m + 'min ' + s + 's'; }
+      else { texto = s + 's'; }
+      contagem.textContent = ' · faltam ' + texto;
+    };
+    var id = setInterval(passo, 1000);
+    passo();
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

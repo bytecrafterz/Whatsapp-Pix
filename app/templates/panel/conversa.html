@@ -1,0 +1,73 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<div class="card">
+  <div class="row-actions">
+    <a href="/painel/conversas">&larr; Conversas</a>
+    <span class="muted">{{ contact.phone or contact.wa_id }}</span>
+    {% if janela_aberta %}
+      <span class="badge ok">janela aberta</span>
+      <span class="muted">fecha em {{ janela_fecha_em|dt_sp_full }}</span>
+    {% else %}
+      <span class="badge bad">janela fechada</span>
+    {% endif %}
+  </div>
+  {% if order %}
+    <p class="muted" style="margin-bottom:0">
+      Pedido {{ order.sale_id }} · {{ order.amount_cents|brl_symbol }} ·
+      <span class="badge {{ order.status|order_badge }}">{{ order.status|order_status_label }}</span>
+      · <a href="/p/{{ order.page_token }}">página do PIX</a>
+    </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Mensagens</h2>
+  {% if not messages %}
+    <p class="muted">Nenhuma mensagem registrada.</p>
+  {% else %}
+  <div class="msgs">
+    {% for m in messages %}
+      <div class="msg {{ 'out' if m.direction == 'out' else 'in' }}">
+        <div class="text">{{ m.body or '(sem texto)' }}</div>
+        <div class="meta">
+          {{ 'Você' if m.direction == 'out' else 'Cliente' }} ·
+          {{ m.created_at|dt_sp_full }}
+          {% if m.kind == 'template' %}· modelo {{ m.template_name or '' }}{% endif %}
+          {% if m.status %}· {{ m.status }}{% endif %}
+          {% if m.error_code %}· <span class="badge bad">erro {{ m.error_code }}</span>{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Responder</h2>
+  {% if not meta_configured %}
+    <p class="flash bad">
+      O token do WhatsApp não está configurado no servidor, então não é possível
+      enviar mensagens por aqui.
+    </p>
+  {% elif not janela_aberta %}
+    <p class="flash bad">
+      A janela de 24 horas está fechada: o cliente precisa enviar uma mensagem antes
+      que você possa responder em texto livre. Enquanto isso, só é possível enviar
+      um modelo aprovado pela Meta.
+    </p>
+  {% endif %}
+  <form method="post" action="/painel/conversas/{{ contact.wa_id }}">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <label for="body">Mensagem
+      <span class="help">Texto livre, enviado como resposta ao cliente.</span>
+    </label>
+    <textarea id="body" name="body" rows="3" maxlength="1000"
+      {% if not janela_aberta or not meta_configured %}disabled{% endif %}>{{ draft }}</textarea>
+    <p style="margin-top:0.75rem">
+      <button class="btn" type="submit"
+        {% if not janela_aberta or not meta_configured %}disabled{% endif %}>Enviar</button>
+    </p>
+  </form>
+</div>
+{% endblock %}

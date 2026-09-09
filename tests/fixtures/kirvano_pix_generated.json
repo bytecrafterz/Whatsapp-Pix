@@ -1,0 +1,84 @@
+{
+  "_comment": "REAL Kirvano PIX_GENERATED payload captured from the client's own webhook log (Integrações > Webhooks > Logs > Detalhes > 'Dados enviados', sale 5LZEB2GJ, 10/07/2026 17:05). Customer PII (name, email, document, phone, ip, cookies) and ad identifiers have been replaced with synthetic values; ALL keys, types, nesting and formats are byte-faithful to the original. Business ids (sale/checkout/product/offer/category) are kept because the parser and offer filtering need them.",
+  "ip": "200.152.1.115",
+  "fee": 6.75,
+  "utm": {
+    "src": "comquizlead9expert2v0fechamentonovo",
+    "utm_term": "Facebook_Stories",
+    "utm_medium": "Aberto|120248144239720388",
+    "utm_source": "FB",
+    "utm_content": "Video 233 Anjo|120248144265040388::IwZXh0bgNhZW0BMABhZGlk",
+    "utm_campaign": "CBO Angel - 1-1-5 - 20/06/2026|120248144239730388"
+  },
+  "type": "ONE_TIME",
+  "event": "PIX_GENERATED",
+  "fiscal": {
+    "fee": 6.75,
+    "net_value": 97,
+    "commission": 90.25,
+    "service_tax": 0,
+    "total_value": 97,
+    "original_value": 97,
+    "coupon_discount": 0,
+    "total_discounts": 0,
+    "total_commissions": 90.25,
+    "automatic_discount": 0,
+    "affiliate_commission": 0,
+    "coproduction_commission": 0
+  },
+  "status": "PENDING",
+  "cookies": {
+    "fbp": "fb.1.1760742058426.392676984852077911",
+    "sck": "v3_96e04d41-05ed-44a3-ba95-755ebef2ba39_6a4bad4e6f95c",
+    "ttp": "01KNZG67BNKFT4DJ34SH4BBY0N_tt.1",
+    "gclid": "11.2034691902.1776911519.430392091.1776936636.1776936635",
+    "fbclid": "IwZXh0bgNhZW0BMABhZGlkAas2KY4St0RzcnRjBmFwcF9pZA"
+  },
+  "payment": {
+    "method": "PIX",
+    "qrcode": "00020101021226990014br.gov.bcb.pix2577pix.bancogenial.com/qr/v3/at/1f8c9a2e-4d7b-4a10-9c3e-2b6f8d5a7e41520400005303986540597.005802BR5925CONNECT LT NEGOCIOS DIGIT6009SAO PAULO62070503***6304A1B2",
+    "expires_at": "2026-07-11 17:05:30",
+    "qrcode_image": "00020101021226990014br.gov.bcb.pix2577pix.bancogenial.com/qr/v3/at/1f8c9a2e-4d7b-4a10-9c3e-2b6f8d5a7e41520400005303986540597.005802BR5925CONNECT LT NEGOCIOS DIGIT6009SAO PAULO62070503***6304A1B2"
+  },
+  "sale_id": "5LZEB2GJ",
+  "customer": {
+    "name": "Maria Souza de Oliveira",
+    "email": "maria.souza.exemplo@gmail.com",
+    "address": {
+      "city": null,
+      "state": null,
+      "number": null,
+      "street": null,
+      "zipcode": null,
+      "complement": null,
+      "neighborhood": null
+    },
+    "document": "00000000191",
+    "phone_number": "5551994697674"
+  },
+  "products": [
+    {
+      "id": "1c5f17f3-8682-4015-9837-05d2d7807757",
+      "name": "A Jornada com meu Anjo",
+      "photo": "products/1c5f17f3-8682-4015-9837-05d2d7807757/cover-1.jpg",
+      "price": "R$ 97,00",
+      "format": "community",
+      "category": "91321cff-087a-4353-96c3-01af1c7f171",
+      "offer_id": "56619168-3b4c-4052-b28b-238288ad2190",
+      "offer_name": "Padrao 97 Sem Order",
+      "description": "A Jornada com meu Anjo é um guia espiritual para guiar",
+      "is_order_bump": false
+    }
+  ],
+  "commission": 90.25,
+  "created_at": "2026-07-10 17:05:30",
+  "checkout_id": "XE11BWM0",
+  "total_price": "R$ 97,00",
+  "contactEmail": "jornadacommeuanjo@outlook.com",
+  "couponDiscount": 0,
+  "payment_method": "PIX",
+  "automaticDiscount": 0,
+  "event_description": "PIX gerado",
+  "affiliateCommission": 0,
+  "coproductionCommission": 0
+}

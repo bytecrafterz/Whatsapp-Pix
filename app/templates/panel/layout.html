@@ -1,0 +1,71 @@
+{# Panel shell: extends the shared base.html (mobile-first, all CSS inline).
+   Only panel-specific rules live here; base.html already provides .card, .btn,
+   .badge, .flash, .table-wrap and the colour variables. #}
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} · Painel{% endblock %}
+
+{% block head %}
+<style>
+  .panel-nav { display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; }
+  .panel-nav a { text-decoration: none; padding: 0.15rem 0; border-bottom: 2px solid transparent; }
+  .panel-nav a[aria-current="page"] { border-bottom-color: var(--accent); font-weight: 700; }
+  h1.page-title { font-size: 1.35rem; margin: 0.25rem 0 1rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+  .grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 0.75rem; }
+  .stat .num { font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+  .stat .lbl { color: var(--muted); font-size: 0.85rem; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .inline-form { display: inline; }
+  .field-error { color: var(--bad); font-size: 0.85rem; }
+  input.invalid, textarea.invalid { border-color: var(--bad); }
+  .help { color: var(--muted); font-weight: 400; font-size: 0.85rem; display: block; }
+  .check { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; margin-top: 0.75rem; }
+  .check input { width: auto; }
+  pre.raw { background: #f2f1ee; border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem;
+            overflow-x: auto; font-size: 0.8rem; white-space: pre; margin: 0.5rem 0 0; }
+  details summary { cursor: pointer; color: var(--accent); }
+  .msgs { display: flex; flex-direction: column; gap: 0.5rem; }
+  .msg { border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem 0.7rem; max-width: 85%; }
+  .msg.in { background: var(--card); align-self: flex-start; }
+  .msg.out { background: #eef0ff; align-self: flex-end; }
+  .msg .meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.25rem; }
+  .msg .text { white-space: pre-wrap; word-break: break-word; }
+  .btn:disabled, .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .nowrap { white-space: nowrap; }
+
+  /* Mobile: tables stop being tables and each row becomes a small block, with
+     the column name coming from the cell's data-rotulo attribute. */
+  @media (max-width: 640px) {
+    table.stack thead { position: absolute; left: -9999px; }
+    table.stack tr { display: block; border-bottom: 1px solid var(--line); padding: 0.4rem 0; }
+    table.stack td { display: flex; justify-content: space-between; gap: 1rem;
+                     border: 0; padding: 0.2rem 0.25rem; }
+    table.stack td::before { content: attr(data-rotulo); font-weight: 600; color: var(--muted); }
+    .msg { max-width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block nav %}
+<nav class="panel-nav">
+  <a href="/painel" {% if active == 'inicio' %}aria-current="page"{% endif %}>Início</a>
+  <a href="/painel/configuracoes" {% if active == 'configuracoes' %}aria-current="page"{% endif %}>Configurações</a>
+  <a href="/painel/conversas" {% if active == 'conversas' %}aria-current="page"{% endif %}>Conversas</a>
+  <a href="/painel/descadastros" {% if active == 'descadastros' %}aria-current="page"{% endif %}>Descadastros</a>
+  <a href="/painel/eventos" {% if active == 'eventos' %}aria-current="page"{% endif %}>Eventos</a>
+  <a href="/painel/modelo" {% if active == 'modelo' %}aria-current="page"{% endif %}>Modelo</a>
+  <a href="/painel/senha" {% if active == 'senha' %}aria-current="page"{% endif %}>Senha</a>
+</nav>
+{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">{{ page_title }}</h1>
+  {% if flash %}<div class="flash {{ flash_kind }}">{{ flash }}</div>{% endif %}
+  {% block painel %}{% endblock %}
+{% endblock %}
+
+{% block footer %}
+<footer class="site">Painel · Jornada com Meu Anjo · versão {{ app_version }}</footer>
+{% endblock %}

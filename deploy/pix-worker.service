@@ -1,0 +1,42 @@
+# pix-worker — the polling loop that claims due jobs and sends the reminder.
+# One instance is enough; the claim protocol (FOR UPDATE SKIP LOCKED) tolerates more.
+# Logs go to journald: `journalctl -u pix-worker -f`.
+[Unit]
+Description=PIX Recovery worker (reminder sender)
+After=network-online.target postgresql.service pix-api.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=pixapp
+Group=pixapp
+WorkingDirectory=/opt/pix-recovery
+EnvironmentFile=/etc/pix-recovery/env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/pix-recovery/.venv/bin/python -m app.worker
+# Restart=always + a short delay: a crashed worker means reminders stop silently,
+# and /health reports the heartbeat age so the outage is visible either way.
+Restart=always
+RestartSec=3
+# SIGINT lets the loop finish the tick it is in; a job already flipped to `sending`
+# is never resent, so a hard kill can only lose a send, never duplicate one.
+KillSignal=SIGINT
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pix-worker
+
+# --- hardening ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

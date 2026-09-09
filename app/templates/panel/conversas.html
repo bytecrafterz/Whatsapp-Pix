@@ -1,0 +1,52 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<div class="card">
+  <p class="muted">
+    Você só pode responder em texto livre dentro de 24 horas após a última mensagem do
+    cliente (regra do WhatsApp). Depois disso a janela fecha.
+  </p>
+  {% if not rows %}
+    <p class="muted">Nenhuma conversa ainda.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr><th>Contato</th><th>Última mensagem</th><th>Janela</th><th>Quando</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td data-rotulo="Contato">
+            <a href="/painel/conversas/{{ row.contact.wa_id }}">
+              {{ row.contact.profile_name or row.contact.phone or row.contact.wa_id }}</a>
+            <span class="muted">{{ row.contact.phone or row.contact.wa_id }}</span>
+          </td>
+          <td data-rotulo="Última mensagem">
+            {% if row.last_message %}
+              <span class="muted">{{ 'você:' if row.last_message.direction == 'out' else 'cliente:' }}</span>
+              {{ (row.last_message.body or '(sem texto)')|truncate(80) }}
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td data-rotulo="Janela">
+            {% if row.window_open %}
+              <span class="badge ok">janela aberta</span>
+              <span class="muted">até {{ row.window_closes_at|dt_sp_full }}</span>
+            {% else %}
+              <span class="badge bad">janela fechada</span>
+            {% endif %}
+          </td>
+          <td data-rotulo="Quando" class="nowrap">
+            {{ (row.contact.last_inbound_at or row.contact.last_outbound_at)|dt_sp_full }}
+          </td>
+          <td data-rotulo=""><a class="btn secondary" href="/painel/conversas/{{ row.contact.wa_id }}">abrir</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

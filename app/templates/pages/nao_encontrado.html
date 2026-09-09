@@ -1,0 +1,17 @@
+{# 404 for an unknown page_token. Deliberately vague: it must not reveal whether a
+   token exists, and the customer's own link is the only way in. #}
+{% extends "pages/_publico.html" %}
+
+{% block title %}Página não encontrada · Jornada com Meu Anjo{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1 style="font-size:1.35rem;margin:0 0 0.6rem">Não encontramos esta página</h1>
+  <p>O link pode ter expirado, sido digitado com alguma letra a mais ou pertencer a um
+     pedido antigo.</p>
+  <p>Abra novamente o link que você recebeu no WhatsApp. Se ele também não funcionar,
+     responda àquela mensagem ou escreva para
+     <a href="mailto:jornadacommeuanjo@outlook.com">jornadacommeuanjo@outlook.com</a>
+     com o número do seu pedido — a gente te ajuda.</p>
+</div>
+{% endblock %}

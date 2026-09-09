@@ -1,0 +1,17 @@
+secrets.env
+*.pem
+.env
+__pycache__/
+.venv/
+*.db
+*.db-wal
+*.db-shm
+.pytest_cache/
+.ruff_cache/
+uv.lock
+build-pix.js
+
+# Client document - his CNPJ registration (legal name, CNPJ, address, contacts).
+# Not ours to publish.
+CNPJConnectLTCerto2025.pdf
+*.pdf

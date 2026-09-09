@@ -1,0 +1,12 @@
+{# Shared shell for the customer-facing pages.
+
+   It only changes the brand header: base.html links it to "/", which the API does
+   not serve (there is no home page — this app is a webhook receiver plus these two
+   pages), so a customer tapping the brand would get a bare 404 from Starlette. #}
+{% extends "base.html" %}
+
+{% block header %}
+<header class="site">
+  <span class="brand">Jornada com Meu Anjo</span>
+</header>
+{% endblock %}

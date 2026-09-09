@@ -1,0 +1,50 @@
+[project]
+name = "pix-recovery"
+version = "0.1.0"
+description = "PIX recovery reminders over the WhatsApp Cloud API for Kirvano checkouts"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "uvicorn[standard]>=0.30,<1.0",
+  "sqlalchemy>=2.0.30,<3.0",
+  "psycopg[binary]>=3.2,<4.0",
+  "pydantic-settings>=2.4,<3.0",
+  "jinja2>=3.1.4,<4.0",
+  "httpx>=0.27,<1.0",
+  "python-multipart>=0.0.9",
+  "qrcode[pil]>=7.4,<9.0",
+  "tzdata>=2024.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2,<9.0",
+  "respx>=0.21,<1.0",
+  "ruff>=0.5,<1.0",
+]
+
+[tool.uv]
+# The repo is an application, not a distributable library: never try to build/install it.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "deploy", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` in a default argument is the FastAPI dependency-injection idiom,
+# not the mutable-default bug B008 is about.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Form"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The repo is an application, not an installed package: put the root on sys.path
+# so `import app` works under `uv run pytest` without an editable install.
+pythonpath = ["."]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,59 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<div class="card">
+  <p>
+    Modelo configurado: <strong>{{ store.template_name }}</strong>
+    ({{ store.template_language }}) · botão de link no índice {{ store.url_button_index }}.
+  </p>
+  <p class="muted">
+    O status abaixo é o último que a Meta nos informou (por webhook ou por esta consulta).
+    A categoria importa no custo: Utilidade é muito mais barata que Marketing.
+  </p>
+  {% if not meta_configured %}
+    <p class="flash bad">
+      O token do WhatsApp não está configurado no servidor: não é possível consultar a Meta agora.
+    </p>
+  {% endif %}
+  <form method="post" action="/painel/modelo">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <button class="btn" type="submit" {% if not meta_configured %}disabled{% endif %}>
+      Consultar status na Meta
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Modelos conhecidos</h2>
+  {% if not rows %}
+    <p class="muted">Nenhum status recebido ainda. Use o botão acima para consultar a Meta.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr><th>Nome</th><th>Idioma</th><th>Status</th><th>Categoria</th><th>Motivo</th><th>Atualizado</th></tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td data-rotulo="Nome">
+            {{ row.name }}
+            {% if row.name == store.template_name and row.language == store.template_language %}
+              <span class="badge">em uso</span>
+            {% endif %}
+          </td>
+          <td data-rotulo="Idioma">{{ row.language }}</td>
+          <td data-rotulo="Status">
+            <span class="badge {{ badges.get(row.status, '') }}">{{ row.status or 'desconhecido' }}</span>
+          </td>
+          <td data-rotulo="Categoria">{{ row.category or '—' }}</td>
+          <td data-rotulo="Motivo">{{ row.reason or '' }}</td>
+          <td data-rotulo="Atualizado" class="nowrap">{{ row.updated_at|dt_sp_full }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

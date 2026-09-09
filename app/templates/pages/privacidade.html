@@ -1,0 +1,208 @@
+{# Public privacy policy (pt-BR). Meta requires a reachable Privacy Policy URL before
+   the app can leave development mode. Plain language, no marketing, no claim of
+   certification or of "total conformity" — only what this system actually does. #}
+{% extends "pages/_publico.html" %}
+
+{% block title %}Política de Privacidade · Jornada com Meu Anjo{% endblock %}
+
+{% block head %}
+<style>
+  h1 { font-size: 1.5rem; margin: 0 0 0.3rem; }
+  h2 { font-size: 1.1rem; margin: 1.4rem 0 0.4rem; }
+  .politica p, .politica li { margin: 0.4rem 0; }
+  .politica ul { padding-left: 1.2rem; }
+  .atualizado { margin: 0 0 1rem; }
+  .dados { border-collapse: collapse; }
+  .dados th { white-space: nowrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<article class="card politica">
+  <h1>Política de Privacidade</h1>
+  <p class="atualizado muted">Última atualização: {{ updated_at }}</p>
+
+  <p>Esta política explica quais dados pessoais tratamos quando você compra o produto
+     <strong>Jornada com Meu Anjo</strong> e recebe, pelo WhatsApp, avisos sobre o pagamento
+     do seu próprio pedido. Ela vale para o checkout, para as mensagens enviadas pelo nosso
+     número de WhatsApp e para a página do PIX (o endereço que começa com
+     <code>/p/</code> e que você abre pelo botão da mensagem).</p>
+
+  <h2>1. Quem é o controlador dos dados</h2>
+  <p><strong>CONNECT LT NEGOCIOS DIGITAIS LTDA</strong> — CNPJ 52.134.502/0001-09, com sede em
+     Florianópolis/SC, responsável pela marca Jornada com Meu Anjo.</p>
+  <ul>
+    <li>Contato para assuntos de privacidade e dados pessoais:
+        <a href="mailto:{{ controller_email }}">{{ controller_email }}</a></li>
+    <li>Atendimento sobre pedidos:
+        <a href="mailto:{{ support_email }}">{{ support_email }}</a></li>
+  </ul>
+  <p>Os pedidos enviados a esses endereços são recebidos e respondidos pela própria empresa.</p>
+
+  <h2>2. Quais dados tratamos</h2>
+  <ul>
+    <li><strong>Identificação e contato:</strong> nome informado no checkout, número de
+        celular (com DDI e DDD) e e-mail.</li>
+    <li><strong>Dados do pedido:</strong> código do pedido, produto e oferta, valor, forma de
+        pagamento (PIX), situação do pagamento (gerado, pago, expirado, recusado, reembolsado),
+        datas e horários, código PIX copia e cola e o prazo de validade dele.</li>
+    <li><strong>Registro do consentimento:</strong> o endereço de IP registrado pela plataforma
+        de checkout no momento da compra e a data e hora correspondentes. Guardamos isso apenas
+        como prova de qual aviso foi exibido a você e quando — nunca aparece em página pública.</li>
+    <li><strong>Mensagens:</strong> o conteúdo das mensagens que trocamos com você pelo WhatsApp
+        (as que enviamos e as que você responde), com o identificador que o WhatsApp atribui ao
+        seu número e o status de entrega (enviada, entregue, lida, falha).</li>
+    <li><strong>Registro de descadastro:</strong> se você pedir para não receber mais avisos,
+        guardamos seu número em uma lista de descadastro para conseguir cumprir o pedido.</li>
+  </ul>
+  <p><strong>O que não guardamos:</strong> não armazenamos o seu CPF — ele é descartado assim que
+     o aviso de pagamento chega até nós e não é gravado em nenhum banco de dados nosso. Também não
+     armazenamos dados de cartão, senhas bancárias nem endereço residencial. Os identificadores de
+     publicidade que a plataforma de checkout envia junto com a compra são descartados do mesmo modo.</p>
+
+  <h2>3. De onde vêm esses dados</h2>
+  <ul>
+    <li>Do formulário de checkout que você preenche na Kirvano, repassado a nós pela própria
+        Kirvano quando um PIX é gerado ou quando o pagamento muda de situação.</li>
+    <li>Do WhatsApp, quando você responde a uma mensagem nossa ou toca em um dos botões.</li>
+  </ul>
+
+  <h2>4. Para que usamos e com qual base legal</h2>
+  <div class="table-wrap">
+    <table class="dados">
+      <thead>
+        <tr><th>Finalidade</th><th>Base legal (LGPD)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Enviar, uma única vez por pedido, um aviso pelo WhatsApp de que o PIX daquele
+              pedido continua pendente, com o valor, o prazo e o link para pagar.</td>
+          <td>Art. 7º, V — execução de contrato ou de procedimentos preliminares relacionados a
+              contrato do qual você é parte.</td>
+        </tr>
+        <tr>
+          <td>Responder às suas mensagens sobre o pedido e prestar atendimento.</td>
+          <td>Art. 7º, V — execução de contrato; e art. 7º, IX — legítimo interesse em atender
+              quem nos procura.</td>
+        </tr>
+        <tr>
+          <td>Manter a lista de descadastro e o registro do consentimento exibido no checkout,
+              para não enviar mensagens a quem pediu para parar e para conseguir demonstrar como
+              o contato foi autorizado.</td>
+          <td>Art. 7º, IX — legítimo interesse em respeitar a sua escolha e em comprovar a
+              regularidade do envio; art. 7º, II — cumprimento de obrigação legal e regulatória,
+              quando aplicável.</td>
+        </tr>
+        <tr>
+          <td>Manter registros técnicos mínimos de funcionamento e segurança do sistema.</td>
+          <td>Art. 7º, IX — legítimo interesse em manter o serviço no ar e seguro.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Quando a base legal é o legítimo interesse, avaliamos se o uso é compatível com o que você
+     espera de nós e limitamos os dados ao mínimo necessário. Você pode se opor a esse uso a
+     qualquer momento pelos canais da seção 8.</p>
+
+  <h2>5. O que não fazemos</h2>
+  <ul>
+    <li>Não vendemos, alugamos nem cedemos seus dados para terceiros usarem em publicidade.</li>
+    <li>Não enviamos propaganda por WhatsApp com base neste cadastro: a mensagem trata do
+        pagamento do seu próprio pedido.</li>
+    <li>Não enviamos um segundo lembrete para o mesmo pedido.</li>
+    <li>Não usamos cookies, pixels ou ferramentas de análise nas páginas deste domínio
+        (a página do PIX e esta política não carregam nada de fora).</li>
+    <li>Não tomamos decisões automatizadas que afetem seus interesses além do envio ou não
+        envio do aviso de pagamento.</li>
+  </ul>
+
+  <h2>6. Com quem compartilhamos</h2>
+  <ul>
+    <li><strong>Meta Platforms, Inc. / WhatsApp</strong> — para entregar a mensagem é preciso
+        enviar à API do WhatsApp o seu número e o conteúdo da mensagem. O uso do WhatsApp por
+        você segue também as políticas da Meta.</li>
+    <li><strong>Kirvano</strong> — plataforma de checkout e pagamento onde a compra é feita;
+        é dela que recebemos os dados do pedido.</li>
+    <li><strong>Provedor de hospedagem</strong> (Hostinger) — mantém o servidor onde este
+        sistema roda e onde os dados ficam armazenados.</li>
+    <li><strong>Autoridades públicas</strong> — apenas quando houver obrigação legal ou ordem
+        judicial.</li>
+  </ul>
+  <p>Parte desses serviços está fora do Brasil, o que envolve transferência internacional de
+     dados (arts. 33 e seguintes da LGPD). Compartilhamos apenas o necessário para a finalidade
+     descrita e exigimos que esses fornecedores tratem os dados conforme os contratos e as
+     políticas de privacidade deles.</p>
+
+  <h2>7. Por quanto tempo guardamos</h2>
+  <ul>
+    <li>Dados do pedido e das mensagens: <strong>12 meses</strong> contados do pedido. Depois
+        disso, são apagados ou anonimizados (ficam apenas números totais, sem identificar você).</li>
+    <li>Registro do consentimento (IP, data e hora do checkout): mesmo prazo de 12 meses.</li>
+    <li>Lista de descadastro: mantida enquanto o sistema existir, porque é ela que garante que
+        você não volte a receber mensagens. Guardamos nela o mínimo: o número e a data do pedido.</li>
+    <li>Prazos maiores podem ser aplicados quando a lei exigir ou para defesa em processo
+        (art. 16 da LGPD).</li>
+  </ul>
+
+  <h2>8. Como parar de receber as mensagens</h2>
+  <ul>
+    <li>Responda <strong>SAIR</strong> (ou “parar”, “cancelar”) na conversa do WhatsApp; ou</li>
+    <li>toque no botão <strong>“Não quero receber”</strong> da mensagem; ou</li>
+    <li>escreva para <a href="mailto:{{ controller_email }}">{{ controller_email }}</a>.</li>
+  </ul>
+  <p>O descadastro vale a partir do momento em que o registramos e cancela qualquer aviso ainda
+     não enviado. Você continua podendo nos escrever sobre o seu pedido, e isso não desfaz o
+     descadastro.</p>
+
+  <h2>9. Seus direitos</h2>
+  <p>O art. 18 da LGPD garante a você, a qualquer momento e gratuitamente, o direito de pedir:</p>
+  <ul>
+    <li>confirmação de que tratamos dados seus;</li>
+    <li>acesso aos dados;</li>
+    <li>correção de dados incompletos, inexatos ou desatualizados;</li>
+    <li>anonimização, bloqueio ou eliminação de dados desnecessários, excessivos ou tratados em
+        desconformidade com a lei;</li>
+    <li>portabilidade a outro fornecedor, conforme a regulamentação;</li>
+    <li>eliminação dos dados tratados com base no consentimento, salvo as hipóteses do art. 16;</li>
+    <li>informação sobre com quem compartilhamos seus dados;</li>
+    <li>informação sobre a possibilidade de não fornecer consentimento e sobre as consequências;</li>
+    <li>revogação do consentimento;</li>
+    <li>oposição a tratamento feito com base no legítimo interesse;</li>
+    <li>revisão de decisões tomadas apenas por meios automatizados.</li>
+  </ul>
+  <p>Para exercer qualquer um deles, escreva para
+     <a href="mailto:{{ controller_email }}">{{ controller_email }}</a> informando o seu nome e o
+     número do pedido. Respondemos em até 15 dias. Podemos pedir alguma informação adicional só
+     para confirmar que a solicitação é sua — e usamos essa informação apenas para isso.</p>
+
+  <h2>10. Segurança</h2>
+  <p>Adotamos medidas razoáveis para proteger os dados: acesso ao sistema restrito a pessoas
+     autorizadas e protegido por senha, conexão cifrada (HTTPS) nas páginas e nas integrações,
+     servidor com firewall e atualizações de segurança, e coleta mínima — o que não é necessário
+     não é guardado, como no caso do CPF. Nenhum sistema é totalmente imune a incidentes; se
+     ocorrer um incidente de segurança relevante, comunicaremos você e a Autoridade Nacional de
+     Proteção de Dados nos termos do art. 48 da LGPD.</p>
+
+  <h2>11. Crianças e adolescentes</h2>
+  <p>O produto é destinado a maiores de 18 anos. Não coletamos intencionalmente dados de crianças
+     ou adolescentes. Se identificarmos um cadastro nessa situação, ele será eliminado.</p>
+
+  <h2>12. Reclamações</h2>
+  <p>Se você não ficar satisfeito com a nossa resposta, pode apresentar reclamação à Autoridade
+     Nacional de Proteção de Dados (ANPD), em <a href="https://www.gov.br/anpd"
+     rel="noopener noreferrer">gov.br/anpd</a>, ou aos órgãos de defesa do consumidor.</p>
+
+  <h2>13. Mudanças nesta política</h2>
+  <p>Se o funcionamento do sistema mudar, atualizamos este texto e a data de “última atualização”
+     no topo da página. Mudanças relevantes na forma como usamos seus dados serão comunicadas
+     pelos canais de contato que você já usa com a gente.</p>
+</article>
+{% endblock %}
+
+{% block footer %}
+<footer class="site">
+  Jornada com Meu Anjo · CONNECT LT NEGOCIOS DIGITAIS LTDA · CNPJ 52.134.502/0001-09 ·
+  <a href="mailto:{{ controller_email }}">{{ controller_email }}</a><br>
+  Última atualização desta política: {{ updated_at }}
+</footer>
+{% endblock %}

@@ -1,0 +1,101 @@
+{% extends "panel/layout.html" %}
+
+{% block painel %}
+<div class="card">
+  <div class="row-actions">
+    {% if enabled %}
+      <span class="badge ok">lembretes ativados</span>
+    {% else %}
+      <span class="badge bad">lembretes desligados</span>
+    {% endif %}
+    <span class="muted">espera de {{ delay_minutes }} min após o PIX</span>
+    {% if worker_ok %}
+      <span class="badge ok">robô de envio ativo</span>
+    {% else %}
+      <span class="badge bad">robô de envio parado</span>
+      <span class="muted">
+        {% if heartbeat_age is none %}nunca deu sinal{% else %}último sinal há {{ heartbeat_age|round|int }} s{% endif %}
+      </span>
+    {% endif %}
+    <a class="btn secondary" href="/painel/configuracoes">Configurações</a>
+  </div>
+</div>
+
+{% if open_alerts %}
+<div class="card">
+  <h2>Avisos do sistema</h2>
+  <ul>
+    {% for alerta in open_alerts %}
+      <li><strong>{{ alerta.code }}</strong> · {{ alerta.message }}
+        <span class="muted">({{ alerta.created_at|dt_sp_full }})</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="grid">
+  <div class="stat"><div class="num">{{ counts.pending_now }}</div><div class="lbl">pendentes agora</div></div>
+  <div class="stat"><div class="num">{{ counts.scheduled }}</div><div class="lbl">lembretes agendados</div></div>
+  <div class="stat"><div class="num">{{ counts.sent_today }}</div><div class="lbl">enviados hoje</div></div>
+  <div class="stat"><div class="num">{{ counts.sent_7d }}</div><div class="lbl">enviados em 7 dias</div></div>
+  <div class="stat"><div class="num">{{ counts.paid_after_reminder }}</div><div class="lbl">pagos após o lembrete</div></div>
+  <div class="stat"><div class="num">{{ counts.cancelled_paid }}</div><div class="lbl">cancelados por pagamento</div></div>
+  <div class="stat"><div class="num">{{ counts.expired }}</div><div class="lbl">PIX expirados</div></div>
+  <div class="stat"><div class="num">{{ counts.failed }}</div><div class="lbl">falhas de envio</div></div>
+</div>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Últimos 50 pedidos</h2>
+  {% if not orders %}
+    <p class="muted">Nenhum pedido recebido ainda.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr>
+          <th>Pedido</th><th>Cliente</th><th>Valor</th><th>Situação</th>
+          <th>Lembrete</th><th>Quando</th><th>Página</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for order, job in orders %}
+        <tr>
+          <td data-rotulo="Pedido" class="nowrap">{{ order.sale_id }}</td>
+          <td data-rotulo="Cliente">
+            {{ first_name(order.customer_name) }}
+            <span class="muted">{{ order.phone_e164 or order.phone_raw or "" }}</span>
+          </td>
+          <td data-rotulo="Valor" class="nowrap">{{ order.amount_cents|brl_symbol }}</td>
+          <td data-rotulo="Situação">
+            <span class="badge {{ order.status|order_badge }}">{{ order.status|order_status_label }}</span>
+          </td>
+          <td data-rotulo="Lembrete">
+            {% if job %}
+              <span class="badge {{ job.state|job_badge }}">{{ job.state|job_state_label }}</span>
+              {% if job.reason %}<span class="muted">{{ job.reason|reason_label }}</span>{% endif %}
+              {% if job.state == 'scheduled' %}
+                <span class="muted">para {{ job.run_at|dt_sp_full }}</span>
+              {% elif job.sent_at %}
+                <span class="muted">em {{ job.sent_at|dt_sp_full }}</span>
+              {% endif %}
+            {% else %}
+              <span class="muted">sem lembrete</span>
+            {% endif %}
+          </td>
+          <td data-rotulo="Quando" class="nowrap">
+            {{ order.created_at|dt_sp_full }}
+            {# Opt-in evidence (SPEC Kirvano fact 5): which checkout notice was shown,
+               when and from where. Panel only — never on a public page. #}
+            {% if order.consent_ip %}
+              <span class="muted">IP {{ order.consent_ip }}{% if order.consent_at %} · {{ order.consent_at|dt_sp_full }}{% endif %}</span>
+            {% endif %}
+          </td>
+          <td data-rotulo="Página"><a href="/p/{{ order.page_token }}">abrir</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
