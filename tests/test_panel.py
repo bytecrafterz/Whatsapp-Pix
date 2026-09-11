@@ -308,6 +308,35 @@ def test_post_with_same_origin_header_is_accepted(client, session):
     assert r.status_code == 303
 
 
+def test_post_from_no_referrer_page_is_accepted(client, session):
+    """What a real browser sends: nginx's `Referrer-Policy: no-referrer` turns Origin
+    into "null" and drops Referer; only Sec-Fetch-Site still names the origin."""
+    nonce = get_nonce(client, "/painel/descadastros")
+    r = client.post(
+        "/painel/descadastros",
+        auth=AUTH,
+        data={"nonce": nonce, "phone": "5551994697674"},
+        headers={"Origin": "null", "Sec-Fetch-Site": "same-origin"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert session.execute(select(OptOut)).scalars().first() is not None
+
+
+@pytest.mark.parametrize("fetch_site", ["cross-site", "same-site"])
+def test_post_flagged_cross_origin_by_fetch_metadata_is_refused(client, session, fetch_site):
+    nonce = get_nonce(client, "/painel/descadastros")
+    r = client.post(
+        "/painel/descadastros",
+        auth=AUTH,
+        data={"nonce": nonce, "phone": "5551994697674"},
+        headers={"Origin": "null", "Sec-Fetch-Site": fetch_site},
+    )
+    assert r.status_code == 403
+    assert "origem da requisição" in r.text
+    assert session.execute(select(OptOut)).scalars().first() is None
+
+
 def test_panel_has_no_get_mutations(client):
     """Mutations are POST-only: the same paths must not answer GET with a change."""
     assert client.get("/painel/descadastros/remover", auth=AUTH).status_code == 405

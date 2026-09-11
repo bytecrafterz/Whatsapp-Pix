@@ -61,9 +61,19 @@ def is_same_origin(request: Request) -> bool:
     Enough for a one-user HTTP-Basic panel (the spec asks for "simple same-origin
     check + POST-only"); a missing Origin *and* Referer is treated as same-origin
     because some browsers omit both on same-site form posts.
+
+    ``Sec-Fetch-Site`` wins when present. nginx sends ``Referrer-Policy: no-referrer``
+    on every page, and under that policy browsers submit forms with ``Origin: null``
+    and no Referer - comparing those to ``Host`` refused every panel save in
+    production. Fetch Metadata is set by the browser from the real origin and is not
+    touched by the referrer policy.
     """
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site:
+        return fetch_site in ("same-origin", "none")
     origin = request.headers.get("origin") or request.headers.get("referer")
-    if not origin:
+    if not origin or origin == "null":
+        # Older browser, no Fetch Metadata: the per-process nonce is the guard.
         return True
     host = request.headers.get("host") or urlsplit(str(request.url)).netloc
     return urlsplit(origin).netloc == host
