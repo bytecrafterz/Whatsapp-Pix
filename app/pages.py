@@ -27,7 +27,7 @@ from __future__ import annotations
 import io
 import logging
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import qrcode
 from fastapi import APIRouter, Depends, Request
@@ -189,14 +189,41 @@ def pix_qr_png(page_token: str, session: Session = Depends(get_session)) -> Resp
     return Response(png, media_type="image/png", headers=headers)
 
 
+def with_tracking(url: str, coupon: str, utm: list[tuple[str, str]]) -> str:
+    """``url`` with the coupon (Kirvano applies ``?coupon=CODE`` by itself) and our UTMs.
+
+    The link's other parameters are kept. Its own ``utm_*`` (the ad the customer first
+    came from) are dropped when we add ours, so the sale is credited to the WhatsApp
+    recovery instead of a mix of both.
+    """
+    ours = list(utm)
+    if coupon:
+        ours.append(("coupon", coupon))
+    if not ours:
+        return url
+    replaced = {k.lower() for k, _ in ours}
+    drop_utm = any(k.lower().startswith("utm_") for k, _ in utm)
+    parts = urlsplit(url)
+    kept = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if k.lower() not in replaced and not (drop_utm and k.lower().startswith("utm_"))
+    ]
+    return urlunsplit(parts._replace(query=urlencode(kept + ours)))
+
+
 def cart_destination(cart: Cart, store: SettingsStore) -> str | None:
     """Where the cart message's button leads: the cart's own checkout link, else the
-    panel's fallback for carts, else the PIX flow's generic checkout link."""
-    return (
+    panel's fallback for carts, else the PIX flow's generic checkout link — with the
+    coupon already applied and the WhatsApp-recovery UTMs."""
+    base = (
         safe_http_url(cart.checkout_url)
         or safe_http_url(store.cart_checkout_url)
         or safe_http_url(store.checkout_url)
     )
+    if base is None:
+        return None
+    return with_tracking(base, store.cart_coupon.strip(), store.cart_link_utm)
 
 
 @router.get("/c/{link_token}")

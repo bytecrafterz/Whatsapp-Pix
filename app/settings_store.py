@@ -12,10 +12,12 @@ being re-queried dozens of times inside one unit of work.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import time
 from typing import Literal
+from urllib.parse import unquote_plus, urlencode
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -51,6 +53,12 @@ CART_MAX_STEPS = 3
 CART_DEFAULT_DELAYS = (60, 24 * 60, 48 * 60)  # minutes after the abandonment
 CART_DEFAULT_TEMPLATE = "carrinho_abandonado_v1"
 CART_DEFAULT_PARAMS = "first_name,product,coupon"
+CART_DEFAULT_LINK_UTM = (
+    "utm_source=whatsapp&utm_medium=recuperacao&utm_campaign=carrinho_abandonado"
+)
+# One key=value pair of the cart link's tracking string.
+_UTM_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
+_UTM_VALUE_MAX = 100
 # A step later than this after the abandonment is never sent (scheduling.MAX_CART_AGE
 # allows a day of slack on top for quiet hours and retries).
 CART_MAX_DELAY_MINUTES = 3 * 24 * 60
@@ -276,6 +284,16 @@ SETTING_DEFS: tuple[SettingDef, ...] = (
         "Para onde o botão leva quando a Kirvano não envia o link do próprio carrinho.",
         group="cart",
     ),
+    SettingDef(
+        "cart_link_utm",
+        "str",
+        lambda s: CART_DEFAULT_LINK_UTM,
+        "Rastreamento do link (UTM)",
+        "Acrescentado ao link do checkout quando o cliente toca no botão, para a venda "
+        "aparecer na Kirvano como vinda da recuperação no WhatsApp. O cupom vai junto "
+        "(coupon=...), já aplicado. Deixe vazio para não acrescentar UTM.",
+        group="cart",
+    ),
     *(d for i in range(1, CART_MAX_STEPS + 1) for d in _cart_step_defs(i)),
     # --- post-sale follow-up (panel page "Pós-venda") ---
     SettingDef(
@@ -317,6 +335,34 @@ _FALSE = {"0", "false", "no", "off", "nao", "não", "n", "f", ""}
 
 class SettingValueError(ValueError):
     """Raised by :meth:`SettingsStore.set` on an invalid value (message is pt-BR)."""
+
+
+def parse_link_utm(raw: str) -> list[tuple[str, str]]:
+    """``utm_source=a&utm_medium=b`` (a leading ``?`` is fine) as ordered pairs.
+
+    Raises :class:`SettingValueError` on a malformed string, so the panel refuses it
+    instead of the redirect producing a broken checkout link.
+    """
+    text = raw.strip().lstrip("?").strip()
+    if not text:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for chunk in text.split("&"):
+        if not chunk:
+            continue
+        name, sep, value = chunk.partition("=")
+        name, value = unquote_plus(name).strip(), unquote_plus(value).strip()
+        if not sep or not _UTM_KEY_RE.match(name) or not value or len(value) > _UTM_VALUE_MAX:
+            raise SettingValueError(
+                f"Rastreamento inválido perto de {chunk!r}: use nome=valor separados por &, "
+                "por exemplo utm_source=whatsapp&utm_medium=recuperacao"
+            )
+        if name.lower() == "coupon":
+            raise SettingValueError(
+                "Não coloque coupon aqui: o cupom do campo Cupom já vai no link."
+            )
+        pairs.append((name, value))
+    return pairs
 
 
 def parse_bool(raw: str) -> bool:
@@ -384,6 +430,8 @@ def _normalise(defn: SettingDef, value: object) -> str:
                 f"(use: {', '.join(sorted(allowed))})"
             )
         return ",".join(keys)
+    if defn.key == "cart_link_utm":
+        return urlencode(parse_link_utm(text))
     if defn.key == "template_params":
         # Mirrors app.panel.validate_setting so the check also holds for callers that
         # do not go through the form. An unknown key silently became an EMPTY template
@@ -535,6 +583,13 @@ class SettingsStore:
     @property
     def cart_checkout_url(self) -> str:
         return self.get("cart_checkout_url")
+
+    @property
+    def cart_link_utm(self) -> list[tuple[str, str]]:
+        try:
+            return parse_link_utm(self.get("cart_link_utm"))
+        except SettingValueError:  # a bad DB value must never break the redirect
+            return []
 
     def cart_step(self, step: int) -> CartStepConfig:
         """Configuration of step ``step`` (1-based), whether or not it is enabled."""

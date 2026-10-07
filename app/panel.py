@@ -90,6 +90,7 @@ from app.settings_store import (
     SettingsStore,
     SettingValueError,
     get_settings_store,
+    parse_link_utm,
 )
 from app.templating import templates
 from app.whatsapp import CART_PARAM_KEYS, POST_PARAM_KEYS, TEMPLATE_PARAM_KEYS, GraphClient
@@ -1046,6 +1047,10 @@ def validate_cart_settings(values: dict[str, str]) -> dict[str, str]:
     coupon = values.get("cart_coupon", "").strip()
     if coupon and not COUPON_RE.match(coupon):
         errors["cart_coupon"] = "Use só letras, números, - e _ (até 40), igual ao cupom na Kirvano."
+    try:
+        parse_link_utm(values.get("cart_link_utm", ""))
+    except SettingValueError as exc:
+        errors["cart_link_utm"] = str(exc)
 
     uses_coupon = False
     needs_link = False

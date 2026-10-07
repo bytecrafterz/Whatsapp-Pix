@@ -151,7 +151,11 @@ Ordem configurada por padrão: `first_name,product,coupon`. Outras chaves aceita
 
 O botão leva ao **nosso** endereço `/c/…`, que conta o clique e redireciona para o checkout do
 próprio carrinho (ou para o *Link do checkout (reserva)* do painel quando a Kirvano não manda o
-link). Por isso o modelo não depende do formato de link da Kirvano. Com um único botão, o
+link). No redirecionamento o sistema acrescenta `coupon=CUPOM` (a Kirvano aplica o cupom
+sozinha, o cliente não digita nada) e as UTMs do campo *Rastreamento do link* (padrão
+`utm_source=whatsapp&utm_medium=recuperacao&utm_campaign=carrinho_abandonado`, que substituem
+as UTMs do anúncio para a venda aparecer como vinda da recuperação). Por isso o modelo não
+depende do formato de link da Kirvano. Com um único botão, o
 **índice do botão de link** é `0`. Se acrescentar o botão de opt-out de marketing da Meta
 (“Parar promoções”) ANTES do link, o índice passa a ser `1`; tocar nele já descadastra o número.
 

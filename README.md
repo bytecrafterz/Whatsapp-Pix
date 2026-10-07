@@ -209,6 +209,10 @@ Vem **desligada**. Para ligar:
    --phone 55DDDSEUNUMERO --url https://api.jornadaanjo.cloud/webhooks/kirvano` e veja o
    carrinho aparecer em **Carrinho** com a mensagem agendada.
 
+O botão abre o checkout com o cupom já aplicado (`?coupon=CUPOM`) e com as UTMs do campo
+**Rastreamento do link** (padrão `utm_source=whatsapp&utm_medium=recuperacao&utm_campaign=carrinho_abandonado`),
+então na Kirvano a venda aparece como vinda da recuperação pelo WhatsApp.
+
 Regras que o sistema aplica sozinho: cada mensagem de um carrinho sai no máximo uma vez
 (mesmo com o evento repetido pela Kirvano, e o mesmo telefone no mesmo dia continua a mesma
 sequência); gerar o PIX ou comprar cancela as mensagens que faltam na hora; quem está com PIX

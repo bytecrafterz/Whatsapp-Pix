@@ -43,6 +43,10 @@ AUTH = ("admin", "panel-pw")
 ORIGIN = {"Origin": "http://testserver"}
 PHONE = "5511987654321"
 CHECKOUT_LINK = "https://pay.kirvano.com/checkout/abc-123"
+# What the button adds to every checkout link by default (coupon from the cart_on fixture).
+TRACKING = (
+    "utm_source=whatsapp&utm_medium=recuperacao&utm_campaign=carrinho_abandonado&coupon=VOLTA10"
+)
 
 
 def cart_payload(
@@ -459,7 +463,9 @@ def test_button_redirects_to_the_checkout_and_counts_the_click(
     handle_event(session, cart_payload(), settings=settings)
     [cart] = _carts(session)
     r = client.get(f"/c/{cart.link_token}", follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"] == CHECKOUT_LINK
+    # Coupon already applied (the public is elderly: nothing to type) and the sale
+    # tagged as coming from the WhatsApp recovery.
+    assert r.status_code == 302 and r.headers["location"] == f"{CHECKOUT_LINK}?{TRACKING}"
     assert r.headers["cache-control"] == "no-store"
     assert r.headers["referrer-policy"] == "no-referrer"
     client.get(f"/c/{cart.link_token}", follow_redirects=False)
@@ -477,8 +483,24 @@ def test_button_falls_back_to_the_panel_link_and_rejects_unsafe_urls(
     [cart] = _carts(session)
     assert cart.checkout_url is None
     r = client.get(f"/c/{cart.link_token}", follow_redirects=False)
-    assert r.headers["location"] == "https://pay.kirvano.com/fallback"
+    assert r.headers["location"] == f"https://pay.kirvano.com/fallback?{TRACKING}"
     assert client.get("/c/does-not-exist", follow_redirects=False).status_code == 404
+
+
+def test_button_link_replaces_the_ad_utms_and_keeps_other_parameters(
+    client, session, settings, cart_on, frozen_clock
+):
+    link = "https://pay.kirvano.com/checkout/abc?src=ad1&utm_source=FB&utm_content=Video+233"
+    handle_event(session, cart_payload(checkout_url=link), settings=settings)
+    [cart] = _carts(session)
+    r = client.get(f"/c/{cart.link_token}", follow_redirects=False)
+    assert r.headers["location"] == f"https://pay.kirvano.com/checkout/abc?src=ad1&{TRACKING}"
+
+    # No UTM configured and no coupon: the link goes out exactly as Kirvano sent it.
+    cart_on.set_many({"cart_link_utm": "", "cart_coupon": ""})
+    session.commit()
+    r = client.get(f"/c/{cart.link_token}", follow_redirects=False)
+    assert r.headers["location"] == link
 
 
 # --- panel --------------------------------------------------------------------------------
@@ -500,6 +522,7 @@ def _form(nonce: str, **overrides: str) -> dict[str, str]:
         "cart_coupon": "VOLTA10",
         "cart_template_language": "pt_BR",
         "cart_checkout_url": "https://pay.kirvano.com/fallback",
+        "cart_link_utm": "utm_source=whatsapp&utm_medium=recuperacao",
     }
     for i, (delay, name, params) in enumerate(
         [("60", "carrinho_abandonado_v1", "first_name,product,coupon"), ("1440", "", ""),
@@ -536,6 +559,7 @@ def test_carrinho_settings_are_saved(client, session, store):
     assert r.status_code == 303
     store.refresh()
     assert store.cart_enabled is True and store.cart_coupon == "VOLTA15"
+    assert store.cart_link_utm == [("utm_source", "whatsapp"), ("utm_medium", "recuperacao")]
     assert store.cart_step(1).params == ("first_name", "product", "coupon")
 
 
@@ -555,6 +579,8 @@ def test_carrinho_settings_are_saved(client, session, store):
         ),
         ({"cart_checkout_url": ""}, "Informe o link do checkout"),
         ({"cart_coupon": "VOLTA 10!"}, "Use só letras"),
+        ({"cart_link_utm": "utm_source"}, "Rastreamento inválido"),
+        ({"cart_link_utm": "utm_source=whatsapp&coupon=X"}, "Não coloque coupon"),
     ],
 )
 def test_carrinho_settings_are_validated(client, session, store, overrides, message):
