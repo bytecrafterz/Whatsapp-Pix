@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -278,13 +279,21 @@ def build_cart_payload(
 # Keys a post-sale template may use. No coupon or checkout link: an offer in a
 # post-sale message makes Meta file the template as Marketing, at Marketing prices.
 POST_PARAM_KEYS = frozenset(
-    {"first_name", "customer_name", "product", "amount", "amount_full", "sale_id", "email"}
+    {"first_name", "customer_name", "product", "amount", "amount_full", "sale_id", "email", "link"}
 )
 EMAIL_MAX_LEN = 120
 
 
-def build_post_sale_params(sale: PostSale, step: StepConfig, *, hard: bool = False) -> list[str]:
+def access_link_url(settings: Settings, sale_id: str) -> str:
+    """Public redirect to the members area of the sale's product (pages.access_redirect)."""
+    return f"{settings.base_url}/a/{quote(sale_id, safe='')}"
+
+
+def build_post_sale_params(
+    sale: PostSale, step: StepConfig, *, hard: bool = False, settings: Settings | None = None
+) -> list[str]:
     """Body parameters for one post-sale step, in the order configured for that step."""
+    settings = settings or get_settings()
     name_len = 30 if hard else NAME_MAX_LEN
     values: dict[str, str] = {
         "first_name": sanitize_param(first_name(sale.customer_name), name_len, ascii_only=hard)
@@ -298,15 +307,23 @@ def build_post_sale_params(sale: PostSale, step: StepConfig, *, hard: bool = Fal
         "sale_id": sanitize_param(sale.sale_id, 64, ascii_only=hard),
         "email": sanitize_param(sale.customer_email or "", EMAIL_MAX_LEN, ascii_only=hard)
         or "seu e-mail",
+        "link": access_link_url(settings, sale.sale_id),
     }
     return fit_body_budget([values.get(key, "") for key in step.params])
 
 
 def build_post_sale_payload(
-    sale: PostSale, step: StepConfig, *, to: str, hard: bool = False
+    sale: PostSale,
+    step: StepConfig,
+    *,
+    to: str,
+    hard: bool = False,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """``POST /messages`` body for one post-sale step (fixed buttons need no component)."""
-    return step_template_payload(step, build_post_sale_params(sale, step, hard=hard), to=to)
+    """``POST /messages`` body for one post-sale step; the dynamic button carries the
+    sale code (a fixed-link button takes no component at all)."""
+    params = build_post_sale_params(sale, step, hard=hard, settings=settings)
+    return step_template_payload(step, params, to=to, button_text=quote(sale.sale_id, safe=""))
 
 
 def step_template_preview(step: StepConfig, params: list[str]) -> str:
@@ -585,7 +602,8 @@ class GraphClient:
         target = to or sale.phone_e164 or sale.phone_alt
         if not target:
             return SendResult(ok=False, to="", error=GraphError(code=None, message="no phone"))
-        return self._post_step(build_post_sale_payload(sale, step, to=target, hard=hard), target)
+        body = build_post_sale_payload(sale, step, to=target, hard=hard, settings=self.settings)
+        return self._post_step(body, target)
 
     def _post_step(self, body: dict[str, Any], target: str) -> SendResult:
         result = self._post_messages(body, target)

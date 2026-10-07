@@ -109,12 +109,24 @@ def _post_step_defs(i: int) -> tuple[SettingDef, ...]:
             group="post",
         ),
         SettingDef(
+            f"post_step{i}_url_button_index",
+            "int",
+            # Message 1 is the access message: its template has the dynamic button.
+            lambda s, i=i: "0" if i == 1 else "-1",
+            f"Mensagem {i}: índice do botão de acesso",
+            "Posição do botão de link dinâmico (área de membros) no modelo, 0 = primeiro. "
+            "Use -1 se o modelo não tiver botão ou se o botão for de link fixo.",
+            min=-1,
+            max=9,
+            group="post",
+        ),
+        SettingDef(
             f"post_step{i}_params",
             "str",
             lambda s: POST_DEFAULT_PARAMS,
             f"Mensagem {i}: ordem dos parâmetros",
             "Chaves separadas por vírgula: first_name, customer_name, product, amount, "
-            "amount_full, sale_id, email. Deixe vazio se o modelo não tiver variáveis.",
+            "amount_full, sale_id, email, link. Deixe vazio se o modelo não tiver variáveis.",
             group="post",
         ),
     )
@@ -333,6 +345,23 @@ SETTING_DEFS: tuple[SettingDef, ...] = (
         "Código do idioma dos modelos de pós-venda, por exemplo pt_BR.",
         group="post",
     ),
+    SettingDef(
+        "post_access_links",
+        "text",
+        lambda s: "",
+        "Links de acesso por produto",
+        "Um produto por linha: nome do produto | link da área de membros (ou do tutorial "
+        "de acesso). O botão leva cada cliente ao link do produto que ele comprou.",
+        group="post",
+    ),
+    SettingDef(
+        "post_access_url",
+        "str",
+        lambda s: "",
+        "Link de acesso (reserva)",
+        "Para onde o botão leva quando o produto da venda não está na lista acima.",
+        group="post",
+    ),
     *(d for i in range(1, POST_MAX_STEPS + 1) for d in _post_step_defs(i)),
 )
 
@@ -464,7 +493,7 @@ def _normalise(defn: SettingDef, value: object) -> str:
         return ",".join(keys)
     if defn.key == "cart_link_utm":
         return urlencode(parse_link_utm(text))
-    if defn.key == "cart_product_links":
+    if defn.key in ("cart_product_links", "post_access_links"):
         return "\n".join(f"{n} | {u}" if n else u for n, u in parse_product_links(text))
     if defn.key == "template_params":
         # Mirrors app.panel.validate_setting so the check also holds for callers that
@@ -664,11 +693,22 @@ class SettingsStore:
     def post_template_language(self) -> str:
         return self.get("post_template_language")
 
+    @property
+    def post_access_links(self) -> list[tuple[str, str]]:
+        try:
+            return parse_product_links(self.get("post_access_links"))
+        except SettingValueError:  # a bad DB value must never break the redirect
+            return []
+
+    @property
+    def post_access_url(self) -> str:
+        return self.get("post_access_url")
+
     def post_step(self, step: int) -> StepConfig:
         """Configuration of post-sale step ``step`` (1-based), enabled or not.
 
-        No dynamic URL button: a post-sale template's link (members area, support)
-        is the same for everyone, so it is a fixed button that takes no parameter.
+        The dynamic URL button carries the sale code: our /a/ redirect sends it to the
+        members area of the product that sale bought (one template for every product).
         """
         if not 1 <= step <= POST_MAX_STEPS:
             raise KeyError(step)
@@ -678,7 +718,7 @@ class SettingsStore:
             delay_minutes=int(self.get(f"post_step{step}_delay_minutes")),
             template_name=self.get(f"post_step{step}_template").strip(),
             language=self.post_template_language,
-            url_button_index=-1,
+            url_button_index=int(self.get(f"post_step{step}_url_button_index")),
             params=tuple(p.strip() for p in params.split(",") if p.strip()),
         )
 

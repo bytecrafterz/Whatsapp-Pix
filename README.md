@@ -235,8 +235,10 @@ recebe; marque também os eventos de **reembolso** e **chargeback** para que as 
 pendentes de uma venda devolvida sejam canceladas.
 
 1. Crie o modelo de **Utilidade** do `docs/TEMPLATE.md` §10 e espere a aprovação.
-2. **Painel › Pós-venda**: modelo e horário de cada mensagem → marque **Mensagens pós-venda
-   ativadas** → salvar → **Consultar status na Meta** (a categoria deve ser `UTILITY`).
+2. **Painel › Pós-venda**: **Links de acesso por produto** (`nome do produto | link da área de
+   membros`, uma linha por produto), modelo e horário de cada mensagem → marque **Mensagens
+   pós-venda ativadas** → salvar → **Consultar status na Meta** (a categoria deve ser
+   `UTILITY`). O botão do modelo (`/a/{{1}}`) leva cada cliente à área do produto que comprou.
 3. Teste sem cliente real: `uv run python scripts/simulate_kirvano.py --event SALE_APPROVED
    --method CREDIT_CARD --phone 55DDDSEUNUMERO --url https://api.jornadaanjo.cloud/webhooks/kirvano`
    (`CREDIT_CARD` para não criar um pedido PIX falso nos números do Início).

@@ -20,6 +20,10 @@
              {% if d.min is not none %}min="{{ d.min }}"{% endif %}
              {% if d.max is not none %}max="{{ d.max }}"{% endif %}
              step="1" required class="{% if erro %}invalid{% endif %}">
+    {% elif d.kind == 'text' %}
+      <textarea id="{{ d.key }}" name="{{ d.key }}" rows="3" spellcheck="false"
+                placeholder="A Jornada com Meu Anjo | https://..."
+                class="{% if erro %}invalid{% endif %}">{{ valor }}</textarea>
     {% else %}
       <input type="text" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
              class="{% if erro %}invalid{% endif %}">
@@ -136,7 +140,9 @@
   <p class="muted" style="margin-top:1rem">
     Use modelos da categoria <strong>Utilidade</strong> (confirmação, acesso, acompanhamento),
     sem oferta nem cupom: com oferta a Meta classifica como Marketing, que custa mais.
-    Um botão de link fixo no modelo (área de membros, suporte) funciona sem configurar nada aqui.
+    O botão de acesso do modelo deve ser de link dinâmico com a URL
+    <code>{{ button_url }}</code>: o sistema leva cada cliente à área de membros do produto
+    que ele comprou (lista acima). Botão de link fixo também funciona: use índice -1.
   </p>
   <p style="margin-top:1rem"><button class="btn" type="submit">Salvar</button></p>
 </form>

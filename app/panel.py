@@ -1267,6 +1267,15 @@ def validate_post_settings(values: dict[str, str]) -> dict[str, str]:
     steps = as_int("post_steps", 1, POST_MAX_STEPS) or 1
     if not values.get("post_template_language", "").strip():
         errors["post_template_language"] = "Informe o idioma, por exemplo pt_BR."
+    access_links: list[tuple[str, str]] = []
+    try:
+        access_links = parse_product_links(values.get("post_access_links", ""))
+    except SettingValueError as exc:
+        errors["post_access_links"] = str(exc).replace("pay.kirvano.com/...", "...")
+    fallback = values.get("post_access_url", "").strip()
+    if fallback and not URL_RE.match(fallback):
+        errors["post_access_url"] = "Use um link completo, começando com https://."
+    needs_link = False
     previous_delay: int | None = None
     for i in range(1, POST_MAX_STEPS + 1):
         enabled = i <= steps
@@ -1278,6 +1287,7 @@ def validate_post_settings(values: dict[str, str]) -> dict[str, str]:
             errors[f"post_step{i}_template"] = (
                 "Use apenas letras minúsculas, números e _ (igual ao nome na Meta)."
             )
+        button = as_int(f"post_step{i}_url_button_index", -1, 9)
         keys = [k.strip() for k in values.get(f"post_step{i}_params", "").split(",") if k.strip()]
         unknown = [k for k in keys if k not in POST_PARAM_KEYS]
         if unknown:
@@ -1287,6 +1297,7 @@ def validate_post_settings(values: dict[str, str]) -> dict[str, str]:
             )
         if not enabled:
             continue
+        needs_link = needs_link or "link" in keys or (button is not None and button >= 0)
         if delay is not None and previous_delay is not None:
             if delay < previous_delay + MIN_STEP_GAP_MINUTES:
                 errors[f"post_step{i}_delay_minutes"] = (
@@ -1294,6 +1305,13 @@ def validate_post_settings(values: dict[str, str]) -> dict[str, str]:
                     f"mensagem {i - 1}."
                 )
         previous_delay = delay if delay is not None else previous_delay
+    enabled_flag = values.get("post_enabled", "false") == "true"
+    if enabled_flag and needs_link and not access_links and not fallback:
+        # setdefault: a malformed line already has the more precise message.
+        errors.setdefault(
+            "post_access_links",
+            "Informe os links de acesso: é para onde o botão da mensagem leva o cliente.",
+        )
     return errors
 
 
@@ -1342,6 +1360,8 @@ def _pos_venda_page(
         meta_configured=client is not None and client.configured,
         worker_ok=heartbeat is not None and heartbeat < 60,
         max_steps=POST_MAX_STEPS,
+        # What goes into the template's dynamic button in WhatsApp Manager.
+        button_url=f"{store.settings.base_url}/a/{{{{1}}}}",
         now=now,
     )
 

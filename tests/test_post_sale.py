@@ -41,6 +41,10 @@ from tests.conftest import (
 AUTH = ("admin", "panel-pw")
 ORIGIN = {"Origin": "http://testserver"}
 PHONE = "5511987654321"
+ACCESS = (
+    "A Jornada com Meu Anjo | https://membros.example.com/jornada\n"
+    "Oração de Santo Antônio | https://membros.example.com/santo-antonio"
+)
 
 
 def sale_payload(
@@ -234,12 +238,11 @@ def test_worker_sends_the_message_and_the_numbers_add_up(session, settings, post
     template = body["template"]
     assert body["to"] == PHONE
     assert template["name"] == "pos_venda_v1" and template["language"] == {"code": "pt_BR"}
-    # Body only: a post-sale button is a fixed link that takes no parameter.
-    assert [c["type"] for c in template["components"]] == ["body"]
-    assert [p["text"] for p in template["components"][0]["parameters"]] == [
-        "Maria",
-        "Jornada com Meu Anjo",
-    ]
+    body_part, button = template["components"]
+    assert [p["text"] for p in body_part["parameters"]] == ["Maria", "Jornada com Meu Anjo"]
+    # The access button carries the sale code; /a/ turns it into the product's members area.
+    assert button["sub_type"] == "url" and button["index"] == "0"
+    assert button["parameters"] == [{"type": "text", "text": "CARD0001"}]
     [job] = _jobs(session)
     assert job.state == "sent" and job.wa_message_id == "wamid.POST1"
     msg = session.execute(select(Message)).scalar_one()
@@ -357,6 +360,43 @@ def test_daily_contact_limit_is_shared_with_the_other_flows(
     assert job.state == "skipped" and job.reason == "daily_limit"
 
 
+def test_access_button_leads_to_the_members_area_of_the_product_bought(
+    client, session, settings, post_on, frozen_clock
+):
+    """Two products, two members areas, one template: the sale code picks the link."""
+    post_on.set_many(
+        {"post_access_links": ACCESS, "post_access_url": "https://membros.example.com/geral"}
+    )
+    session.commit()
+    for sale_id, product in [
+        ("CARD0001", "A Jornada com meu Anjo"),
+        ("CARD0002", "Oracao de Santo Antonio"),  # accents and case do not matter
+        ("CARD0003", "Outro produto"),
+    ]:
+        body = sale_payload(sale_id=sale_id)
+        body["products"][0]["name"] = product
+        handle_event(session, body, settings=settings)
+
+    def location(sale_id: str) -> str:
+        r = client.get(f"/a/{sale_id}", follow_redirects=False)
+        assert r.status_code == 302 and r.headers["cache-control"] == "no-store"
+        return r.headers["location"]
+
+    assert location("CARD0001") == "https://membros.example.com/jornada"
+    assert location("CARD0002") == "https://membros.example.com/santo-antonio"
+    assert location("CARD0003") == "https://membros.example.com/geral"  # not listed
+    assert client.get("/a/NOPE0000", follow_redirects=False).status_code == 404
+
+
+def test_link_parameter_is_the_access_url(session, settings, store):
+    from app.whatsapp import build_post_sale_params
+
+    store.set("post_step1_params", "first_name,link")
+    sale = PostSale(sale_id="CARD0001", customer_name="Maria Souza", paid_at=DEFAULT_NOW)
+    params = build_post_sale_params(sale, store.post_step(1), settings=settings)
+    assert params == ["Maria", "https://api.test.local/a/CARD0001"]
+
+
 # --- panel --------------------------------------------------------------------------------
 
 
@@ -379,6 +419,9 @@ def _form(nonce: str, **overrides: str) -> dict[str, str]:
         data[f"post_step{i}_delay_minutes"] = delay
         data[f"post_step{i}_template"] = name
         data[f"post_step{i}_params"] = "first_name,product"
+        data[f"post_step{i}_url_button_index"] = "0" if i == 1 else "-1"
+    data["post_access_links"] = ACCESS
+    data["post_access_url"] = ""
     data.update(overrides)
     return data
 
@@ -422,6 +465,8 @@ def test_pos_venda_settings_are_saved(client, session, store):
             "pelo menos 60 minutos",
         ),
         ({"post_step1_delay_minutes": "99999"}, "Use um número entre 0 e 43200"),
+        ({"post_access_links": ""}, "Informe os links de acesso"),
+        ({"post_access_links": "Produto sem link"}, "Linha inválida"),
     ],
 )
 def test_pos_venda_settings_are_validated(client, session, store, overrides, message):

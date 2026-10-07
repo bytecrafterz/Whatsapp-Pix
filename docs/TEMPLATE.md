@@ -192,13 +192,24 @@ Olá {{1}}, sua compra de {{2}} foi confirmada! Enviamos as informações de ace
 
 Ordem configurada por padrão: `first_name,product`. Outras chaves aceitas: `customer_name`,
 `amount` (`97,00`), `amount_full` (`R$ 97,00`), `sale_id` (código da venda), `email` (o
-e-mail da compra, para "enviamos o acesso para {{3}}").
+e-mail da compra, para "enviamos o acesso para {{3}}"), `link` (URL completa de acesso, para
+modelo sem botão).
 
 **Rodapé:** opcional.
 
-**Botão** (opcional) — *Chamada para ação › Acessar o site*, tipo **Estático**, com o link
-fixo da área de membros ou do suporte (ex.: texto `Acessar meu produto`). Botão estático não
-precisa de configuração no painel. Não use botão de link **dinâmico** neste modelo.
+**Botão** — *Chamada para ação › Acessar o site*, tipo **Dinâmico**:
+
+| Campo | Valor |
+|---|---|
+| Texto do botão | `Acessar meu produto` |
+| URL | `https://api.jornadaanjo.cloud/a/{{1}}` |
+| Amostra | `ABC12345` |
+
+O botão leva ao **nosso** endereço `/a/…` com o código da venda, que redireciona para a área
+de membros (ou o tutorial de acesso) **do produto que o cliente comprou**, conforme a lista
+*Links de acesso por produto* do painel. Assim um único modelo aprovado serve para todos os
+produtos, e trocar um link não exige nova aprovação. Índice do botão: `0` (padrão da
+Mensagem 1). Se preferir um botão de link **fixo**, coloque `-1` no índice.
 
 Para uma 2ª ou 3ª mensagem (ex.: acompanhamento 3 dias depois), crie outro modelo, por exemplo
 `pos_venda_acompanhamento_v1`:

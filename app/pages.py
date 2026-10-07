@@ -39,8 +39,8 @@ from app import clock
 from app.cart import register_click
 from app.db import get_session
 from app.deps import FRAME_DENY_HEADERS
-from app.models import Cart, Order, OrderStatus
-from app.queries import cart_by_link_token, order_by_page_token
+from app.models import Cart, Order, OrderStatus, PostSale
+from app.queries import cart_by_link_token, order_by_page_token, post_sale_by_sale_id
 from app.settings_store import SettingsStore, get_settings_store
 from app.templating import templates
 
@@ -221,9 +221,9 @@ def _product_key(name: str | None) -> str:
     return " ".join(plain.casefold().split())
 
 
-def product_checkout_link(cart: Cart, links: list[tuple[str, str]]) -> str | None:
-    """The panel's checkout link for the cart's product: same product name (ignoring
-    case and accents), else a link that contains the cart's Kirvano offer id."""
+def product_checkout_link(cart: Cart | PostSale, links: list[tuple[str, str]]) -> str | None:
+    """The panel's link for the cart's (or sale's) product: same product name (ignoring
+    case and accents), else a link that contains its Kirvano offer id."""
     product = _product_key(cart.product_name)
     for name, url in links:
         if name and product and _product_key(name) == product:
@@ -279,6 +279,30 @@ def cart_redirect(
         log.exception("could not record click for cart %s", cart.id)
     # 302 + no-store: the redirect must be re-evaluated (and counted) on every tap.
     # no-referrer keeps the link token out of Kirvano's logs.
+    return RedirectResponse(destination, status_code=302, headers=NO_STORE_HEADERS)
+
+
+@router.get("/a/{sale_id}")
+def access_redirect(
+    sale_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+) -> Response:
+    """The post-sale message's button: send the buyer to their product's members area.
+
+    One approved template serves every product: the button carries the sale code and
+    the panel's per-product list decides where it leads.
+    """
+    sale = post_sale_by_sale_id(session, sale_id)
+    if sale is None:
+        return _not_found(request)
+    destination = product_checkout_link(sale, store.post_access_links) or safe_http_url(
+        store.post_access_url
+    )
+    if destination is None:
+        log.warning("post-sale %s: no access link for product %r", sale.sale_id, sale.product_name)
+        return _not_found(request)
     return RedirectResponse(destination, status_code=302, headers=NO_STORE_HEADERS)
 
 

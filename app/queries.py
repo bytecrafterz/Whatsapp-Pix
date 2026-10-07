@@ -497,6 +497,12 @@ def recent_post_sales(session: Session, limit: int = 50) -> list[PostSale]:
     )
 
 
+def post_sale_by_sale_id(session: Session, sale_id: str) -> PostSale | None:
+    if not sale_id:
+        return None
+    return session.execute(select(PostSale).where(PostSale.sale_id == sale_id)).scalar_one_or_none()
+
+
 def post_sale_status_label(status: str | None) -> str:
     return {
         PostSaleStatus.ACTIVE.value: "venda aprovada",
