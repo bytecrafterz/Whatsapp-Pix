@@ -31,6 +31,7 @@ from app.models import (
     MessageStatus,
     OptOutSource,
     Order,
+    PostSaleJob,
     RecoveryJob,
     TemplateStatus,
     WebhookEvent,
@@ -355,6 +356,11 @@ def record_status(
             # Not a PIX reminder: maybe a step of an abandoned-cart sequence.
             job = session.execute(
                 select(CartJob).where(CartJob.wa_message_id == st.message_id)
+            ).scalar_one_or_none()
+        if job is None:
+            # ... or of a post-sale follow-up.
+            job = session.execute(
+                select(PostSaleJob).where(PostSaleJob.wa_message_id == st.message_id)
             ).scalar_one_or_none()
         if job is not None and job.state == JobState.SENT.value:
             job.error_code = msg.error_code

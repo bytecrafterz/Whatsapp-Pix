@@ -88,6 +88,14 @@ def test_simulated_status_events() -> None:
     assert expired["checkout_url"].startswith("https://pay.kirvano.com/recovery/")
 
 
+def test_simulated_card_sale_has_no_pix_fields() -> None:
+    card = simulate_kirvano.build_payload("SALE_APPROVED", method="credit_card")
+    assert card["payment_method"] == "CREDIT_CARD" and card["payment"]["method"] == "CREDIT_CARD"
+    assert "qrcode" not in card["payment"] and card["payment"]["finished_at"]
+    args = simulate_kirvano.build_parser().parse_args(["--method", "CREDIT_CARD"])
+    assert args.method == "CREDIT_CARD"
+
+
 def test_random_code_shape() -> None:
     code = simulate_kirvano.random_code()
     assert len(code) == 8

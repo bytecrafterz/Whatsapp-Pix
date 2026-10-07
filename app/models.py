@@ -119,6 +119,12 @@ class CartStatus(StrEnum):
     PURCHASED = "purchased"  # bought (``recovered`` says whether a cart message came first)
 
 
+class PostSaleStatus(StrEnum):
+    ACTIVE = "active"  # sale approved; the follow-up messages may still be running
+    REFUNDED = "refunded"  # refunded: whatever was still scheduled was cancelled
+    CHARGEBACK = "chargeback"  # same, after a chargeback
+
+
 # --- tables ---------------------------------------------------------------------------
 
 
@@ -314,6 +320,84 @@ class CartJob(Base):
     updated_at: Mapped[datetime]
 
     cart: Mapped[Cart] = relationship(back_populates="jobs")
+
+
+class PostSale(Base):
+    """One approved sale (Kirvano ``SALE_APPROVED``) and its post-sale follow-up.
+
+    Its own table, like ``carts``: ``orders`` only ever holds PIX sales, while a
+    follow-up goes to every approved sale, card or PIX. ``sale_id`` is unique, so a
+    sale gets one sequence however many times Kirvano repeats the event.
+    """
+
+    __tablename__ = "post_sales"
+    __table_args__ = (
+        UniqueConstraint("sale_id", name="uq_post_sales_sale_id"),
+        Index("ix_post_sales_phone_e164", "phone_e164"),
+        Index("ix_post_sales_phone_alt", "phone_alt"),
+        Index("ix_post_sales_paid_at", "paid_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sale_id: Mapped[str] = mapped_column(String(64))
+    checkout_id: Mapped[str | None] = mapped_column(String(64))
+    offer_id: Mapped[str | None] = mapped_column(String(64))
+    product_name: Mapped[str | None] = mapped_column(String(255))
+    customer_name: Mapped[str | None] = mapped_column(String(255))
+    customer_email: Mapped[str | None] = mapped_column(String(255))
+    phone_raw: Mapped[str | None] = mapped_column(String(32))
+    phone_e164: Mapped[str | None] = mapped_column(String(20))
+    phone_alt: Mapped[str | None] = mapped_column(String(20))
+    wa_id: Mapped[str | None] = mapped_column(String(20))
+    amount_cents: Mapped[int | None] = mapped_column(Integer)
+    payment_method: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default=PostSaleStatus.ACTIVE.value)
+    # Why no sequence was started (disabled, no_phone, opted_out, ...); NULL when it was.
+    reason: Mapped[str | None] = mapped_column(String(64))
+    paid_at: Mapped[datetime]
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
+
+    jobs: Mapped[list[PostSaleJob]] = relationship(
+        back_populates="sale", order_by="PostSaleJob.step", cascade="all, delete-orphan"
+    )
+
+    @property
+    def phone_variants(self) -> list[str]:
+        return [p for p in (self.phone_e164, self.phone_alt) if p]
+
+
+class PostSaleJob(Base):
+    """One message of a sale's follow-up; ``(post_sale_id, step)`` is unique."""
+
+    __tablename__ = "post_sale_jobs"
+    __table_args__ = (
+        UniqueConstraint("post_sale_id", "step", name="uq_post_sale_jobs_sale_step"),
+        Index("ix_post_sale_jobs_state_run_at", "state", "run_at"),
+        Index("ix_post_sale_jobs_wa_message_id", "wa_message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_sale_id: Mapped[int] = mapped_column(ForeignKey("post_sales.id", ondelete="CASCADE"))
+    step: Mapped[int] = mapped_column(Integer)  # 1-based position in the sequence
+    run_at: Mapped[datetime]
+    # Never sent after this (its configured time plus a day of slack): a "thanks for
+    # your purchase" that turns up days late reads like a mistake.
+    deadline_at: Mapped[datetime]
+    state: Mapped[str] = mapped_column(String(16), default=JobState.SCHEDULED.value)
+    reason: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    claimed_at: Mapped[datetime | None]
+    sent_at: Mapped[datetime | None]
+    sent_to: Mapped[str | None] = mapped_column(String(20))
+    wa_message_id: Mapped[str | None] = mapped_column(String(128))
+    template_name: Mapped[str | None] = mapped_column(String(128))
+    error_code: Mapped[str | None] = mapped_column(String(32))
+    error_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
+
+    sale: Mapped[PostSale] = relationship(back_populates="jobs")
 
 
 class Message(Base):

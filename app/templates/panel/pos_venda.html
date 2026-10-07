@@ -1,0 +1,189 @@
+{% extends "panel/layout.html" %}
+
+{# One settings field, same markup as Configurações and Carrinho. #}
+{% macro campo(d) %}
+  {% set valor = values.get(d.key, '') %}
+  {% set erro = errors.get(d.key) %}
+  {% if d.kind == 'bool' %}
+    <label class="check" for="{{ d.key }}">
+      <input type="checkbox" id="{{ d.key }}" name="{{ d.key }}" value="true"
+             {% if valor == 'true' %}checked{% endif %}>
+      {{ d.label }}
+    </label>
+    <span class="help">{{ d.help }}</span>
+  {% else %}
+    <label for="{{ d.key }}">{{ d.label }}
+      <span class="help">{{ d.help }}</span>
+    </label>
+    {% if d.kind == 'int' %}
+      <input type="number" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+             {% if d.min is not none %}min="{{ d.min }}"{% endif %}
+             {% if d.max is not none %}max="{{ d.max }}"{% endif %}
+             step="1" required class="{% if erro %}invalid{% endif %}">
+    {% else %}
+      <input type="text" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+             class="{% if erro %}invalid{% endif %}">
+    {% endif %}
+  {% endif %}
+  {% if erro %}<p class="field-error">{{ erro }}</p>{% endif %}
+{% endmacro %}
+
+{% block painel %}
+<div class="card">
+  <div class="row-actions">
+    {% if store.post_enabled %}
+      <span class="badge ok">mensagens pós-venda ativadas</span>
+    {% else %}
+      <span class="badge bad">mensagens pós-venda desligadas</span>
+    {% endif %}
+    <span class="muted">
+      {{ steps|length }} mensage{{ 'm' if steps|length == 1 else 'ns' }} por venda
+    </span>
+    {% if not worker_ok %}<span class="badge bad">robô de envio parado</span>{% endif %}
+  </div>
+  <p class="muted" style="margin:0.5rem 0 0">
+    Quando a Kirvano avisa uma venda aprovada (PIX, cartão ou boleto), o cliente recebe as
+    mensagens abaixo no horário configurado: por exemplo a confirmação com o acesso ao
+    produto e, alguns dias depois, um acompanhamento. Se a venda for reembolsada ou tiver
+    chargeback, as mensagens que faltam são canceladas. Quem pediu para sair não recebe.
+  </p>
+</div>
+
+<div class="card">
+  <div class="row-actions" style="justify-content:space-between">
+    <h2 style="margin:0">Resultados · {{ period_label }}</h2>
+    <span class="row-actions">
+      {% for key, (label, _) in periods.items() %}
+        {% if key == period_key %}<strong>{{ label }}</strong>
+        {% else %}<a href="/painel/pos-venda?periodo={{ key }}">{{ label }}</a>{% endif %}
+      {% endfor %}
+    </span>
+  </div>
+</div>
+<div class="grid">
+  <div class="stat"><div class="num">{{ metrics.sales }}</div><div class="lbl">vendas aprovadas</div></div>
+  <div class="stat"><div class="num">{{ metrics.sent }}</div><div class="lbl">mensagens enviadas</div></div>
+  <div class="stat"><div class="num">{{ metrics.delivered }}</div><div class="lbl">entregues</div></div>
+  <div class="stat"><div class="num">{{ metrics.read }}</div><div class="lbl">lidas</div></div>
+  <div class="stat"><div class="num">{{ ('%.1f'|format(metrics.read_rate))|replace('.', ',') }}%</div><div class="lbl">taxa de leitura</div></div>
+  <div class="stat"><div class="num">{{ metrics.replied }}</div><div class="lbl">clientes responderam</div></div>
+  <div class="stat"><div class="num">{{ metrics.scheduled }}</div><div class="lbl">mensagens agendadas</div></div>
+  <div class="stat"><div class="num">{{ metrics.failed }}</div><div class="lbl">falharam</div></div>
+  <div class="stat"><div class="num">{{ metrics.reversed }}</div><div class="lbl">reembolsos e chargebacks</div></div>
+</div>
+<p class="muted">
+  Responderam = o cliente escreveu para o número em até 3 dias depois da primeira mensagem
+  de pós-venda ({{ metrics.sent_sales }} vendas receberam mensagem). As respostas aparecem em
+  <a href="/painel/conversas">Conversas</a>.
+</p>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Modelos das mensagens</h2>
+  <div class="table-wrap">
+    <table class="stack">
+      <thead><tr><th>Mensagem</th><th>Quando</th><th>Modelo</th><th>Status na Meta</th><th>Categoria</th></tr></thead>
+      <tbody>
+      {% for s in steps %}
+        {% set row = template_rows.get((s.template_name, s.language)) %}
+        <tr>
+          <td data-rotulo="Mensagem">{{ s.step }}</td>
+          <td data-rotulo="Quando">{{ s.delay_minutes }} min após a aprovação</td>
+          <td data-rotulo="Modelo">{{ s.template_name or '—' }} <span class="muted">({{ s.language }})</span></td>
+          <td data-rotulo="Status na Meta">
+            {% if row %}<span class="badge {{ badges.get(row.status, '') }}">{{ row.status or 'desconhecido' }}</span>
+            {% else %}<span class="muted">não consultado</span>{% endif %}
+          </td>
+          <td data-rotulo="Categoria">
+            {{ row.category if row and row.category else '—' }}
+            {% if row and row.category and row.category|upper == 'MARKETING' %}
+              <span class="muted">(custa mais que Utilidade)</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" action="/painel/pos-venda/modelos" style="margin-top:0.75rem">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <button class="btn secondary" type="submit" {% if not meta_configured %}disabled{% endif %}>
+      Consultar status na Meta
+    </button>
+  </form>
+</div>
+
+<form class="card" method="post" action="/painel/pos-venda">
+  <h2>Configurações do pós-venda</h2>
+  <input type="hidden" name="nonce" value="{{ nonce }}">
+  {% if errors.get('__all__') %}<p class="field-error">{{ errors['__all__'] }}</p>{% endif %}
+
+  {% for d in definitions if not d.key.startswith('post_step') %}
+    {{ campo(d) }}
+  {% endfor %}
+
+  {% for i in range(1, max_steps + 1) %}
+    <fieldset style="margin-top:1rem; border:1px solid var(--line); border-radius:10px; padding:0.5rem 0.9rem">
+      <legend><strong>Mensagem {{ i }}</strong>
+        <span class="muted">{% if i > (values.get('post_steps', '1')|int) %}(desligada — aumente a quantidade de mensagens){% endif %}</span>
+      </legend>
+      {% for d in definitions if d.key.startswith('post_step' ~ i ~ '_') %}
+        {{ campo(d) }}
+      {% endfor %}
+    </fieldset>
+  {% endfor %}
+
+  <p class="muted" style="margin-top:1rem">
+    Use modelos da categoria <strong>Utilidade</strong> (confirmação, acesso, acompanhamento),
+    sem oferta nem cupom: com oferta a Meta classifica como Marketing, que custa mais.
+    Um botão de link fixo no modelo (área de membros, suporte) funciona sem configurar nada aqui.
+  </p>
+  <p style="margin-top:1rem"><button class="btn" type="submit">Salvar</button></p>
+</form>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Últimas 50 vendas</h2>
+  {% if not sales %}
+    <p class="muted">Nenhuma venda aprovada recebida ainda. Confira se o evento
+      “Compra aprovada” está marcado no webhook da Kirvano.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr><th>Aprovada em</th><th>Cliente</th><th>Produto</th><th>Situação</th><th>Mensagens</th></tr>
+      </thead>
+      <tbody>
+      {% for sale in sales %}
+        <tr>
+          <td data-rotulo="Aprovada em" class="nowrap">{{ sale.paid_at|dt_sp_full }}</td>
+          <td data-rotulo="Cliente">
+            {{ first_name(sale.customer_name) }}
+            <span class="muted">{{ sale.phone_e164 or sale.phone_raw or 'sem telefone' }}</span>
+          </td>
+          <td data-rotulo="Produto">
+            {{ sale.product_name or '—' }}
+            {% if sale.amount_cents %}<span class="muted">{{ sale.amount_cents|brl_symbol }}</span>{% endif %}
+          </td>
+          <td data-rotulo="Situação">
+            {{ sale.status|post_sale_status_label }}
+            {% if sale.reason %}<span class="muted">{{ sale.reason|reason_label }}</span>{% endif %}
+          </td>
+          <td data-rotulo="Mensagens">
+            {% for job in sale.jobs %}
+              <div>
+                {{ job.step }}: <span class="badge {{ job.state|job_badge }}">{{ job.state|job_state_label }}</span>
+                {% if job.state == 'scheduled' %}<span class="muted">para {{ job.run_at|dt_sp_full }}</span>
+                {% elif job.sent_at %}<span class="muted">em {{ job.sent_at|dt_sp_full }}</span>{% endif %}
+                {% if job.reason and job.state != 'scheduled' %}<span class="muted">{{ job.reason|reason_label }}</span>{% endif %}
+              </div>
+            {% else %}
+              <span class="muted">nenhuma</span>
+            {% endfor %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

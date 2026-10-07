@@ -33,6 +33,12 @@ from app.models import (
     WebhookEvent,
 )
 from app.phone import normalize_br
+from app.postsale import (
+    EVENT_SALE_APPROVED,
+    REVERSAL_EVENTS,
+    handle_sale_approved,
+    on_sale_reversed,
+)
 from app.scheduling import cancel_for_order, schedule_for_order
 from app.settings_store import SettingsStore
 
@@ -459,6 +465,7 @@ class EventResult:
     reason: str | None = None
     webhook_event_id: int | None = None
     cart_id: int | None = None
+    post_sale_id: int | None = None
 
 
 def new_page_token() -> str:
@@ -722,6 +729,12 @@ def handle_event(
             # never saw as a PIX): that sale still ends — and may recover — a cart.
             # The order lock (if any) is already held, so cart locks come second.
             on_sale_event(session, payload, now)
+        # Post-sale follow-up last: it locks its own row after the order and cart locks
+        # (see app.postsale), and it too must see card sales the order path ignored.
+        if payload.event == EVENT_SALE_APPROVED:
+            handle_sale_approved(session, payload, store, now, result)
+        elif payload.event in REVERSAL_EVENTS:
+            on_sale_reversed(session, payload, now)
         evt.processed_at = now
         evt.outcome = result.outcome
         session.commit()

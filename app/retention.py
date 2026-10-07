@@ -37,7 +37,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app import clock
-from app.models import Cart, Contact, Message, Order, WebhookEvent
+from app.models import Cart, Contact, Message, Order, PostSale, WebhookEvent
 
 log = logging.getLogger("app.retention")
 
@@ -56,6 +56,7 @@ class PurgeResult:
     contacts_anonymised: int = 0
     events_deleted: int = 0
     carts_anonymised: int = 0
+    post_sales_anonymised: int = 0
 
     @property
     def total(self) -> int:
@@ -65,6 +66,7 @@ class PurgeResult:
             + self.contacts_anonymised
             + self.events_deleted
             + self.carts_anonymised
+            + self.post_sales_anonymised
         )
 
     def summary(self) -> str:
@@ -74,7 +76,8 @@ class PurgeResult:
             f"{self.messages_anonymised} mensagens anonimizadas, "
             f"{self.contacts_anonymised} contatos anonimizados, "
             f"{self.events_deleted} eventos apagados, "
-            f"{self.carts_anonymised} carrinhos anonimizados"
+            f"{self.carts_anonymised} carrinhos anonimizados, "
+            f"{self.post_sales_anonymised} vendas do pós-venda anonimizadas"
         )
 
 
@@ -210,6 +213,39 @@ def purge(
                 wa_id=None,
                 consent_ip=None,
                 checkout_url=None,
+                updated_at=now,
+            )
+        )
+
+    # --- post-sale follow-ups --------------------------------------------------
+    # Same rule again: identity goes; sale code, product, amount and status stay.
+    post_ids = list(
+        session.execute(
+            select(PostSale.id).where(
+                PostSale.paid_at < cutoff,
+                or_(
+                    PostSale.customer_name.is_not(None),
+                    PostSale.customer_email.is_not(None),
+                    PostSale.phone_raw.is_not(None),
+                    PostSale.phone_e164.is_not(None),
+                    PostSale.phone_alt.is_not(None),
+                    PostSale.wa_id.is_not(None),
+                ),
+            )
+        ).scalars()
+    )
+    result.post_sales_anonymised = len(post_ids)
+    if post_ids and not dry_run:
+        session.execute(
+            update(PostSale)
+            .where(PostSale.id.in_(post_ids))
+            .values(
+                customer_name=None,
+                customer_email=None,
+                phone_raw=None,
+                phone_e164=None,
+                phone_alt=None,
+                wa_id=None,
                 updated_at=now,
             )
         )

@@ -21,8 +21,8 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.format import first_name, fmt_brl, fmt_dt_sp
-from app.models import Cart, Order
-from app.settings_store import CartStepConfig, SettingsStore
+from app.models import Cart, Order, PostSale
+from app.settings_store import CartStepConfig, SettingsStore, StepConfig
 
 log = logging.getLogger(__name__)
 
@@ -224,30 +224,26 @@ def build_cart_params(
     return fit_body_budget([values.get(key, "") for key in step.params])
 
 
-def build_cart_payload(
-    cart: Cart,
-    step: CartStepConfig,
-    coupon: str,
-    *,
-    to: str,
-    hard: bool = False,
-    settings: Settings | None = None,
+def step_template_payload(
+    step: StepConfig, params: list[str], *, to: str, button_text: str | None = None
 ) -> dict[str, Any]:
-    """``POST /messages`` body for one cart step; the URL button carries the link token."""
-    settings = settings or get_settings()
-    params = build_cart_params(cart, step, coupon, hard=hard, settings=settings)
+    """``POST /messages`` body for one step of a sequence (cart or post-sale).
+
+    A template with no variables takes NO body component (``"parameters": []`` is what
+    Meta answers #132000 to); the URL button is added only when the step has one.
+    """
     components: list[dict[str, Any]] = []
     if params:
         components.append(
             {"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}
         )
-    if step.url_button_index >= 0:
+    if step.url_button_index >= 0 and button_text:
         components.append(
             {
                 "type": "button",
                 "sub_type": "url",
                 "index": str(step.url_button_index),
-                "parameters": [{"type": "text", "text": cart.link_token}],
+                "parameters": [{"type": "text", "text": button_text}],
             }
         )
     return {
@@ -262,7 +258,59 @@ def build_cart_payload(
     }
 
 
-def cart_template_preview(step: CartStepConfig, params: list[str]) -> str:
+def build_cart_payload(
+    cart: Cart,
+    step: CartStepConfig,
+    coupon: str,
+    *,
+    to: str,
+    hard: bool = False,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    """``POST /messages`` body for one cart step; the URL button carries the link token."""
+    settings = settings or get_settings()
+    params = build_cart_params(cart, step, coupon, hard=hard, settings=settings)
+    return step_template_payload(step, params, to=to, button_text=cart.link_token)
+
+
+# --- post-sale templates -----------------------------------------------------------------
+
+# Keys a post-sale template may use. No coupon or checkout link: an offer in a
+# post-sale message makes Meta file the template as Marketing, at Marketing prices.
+POST_PARAM_KEYS = frozenset(
+    {"first_name", "customer_name", "product", "amount", "amount_full", "sale_id", "email"}
+)
+EMAIL_MAX_LEN = 120
+
+
+def build_post_sale_params(sale: PostSale, step: StepConfig, *, hard: bool = False) -> list[str]:
+    """Body parameters for one post-sale step, in the order configured for that step."""
+    name_len = 30 if hard else NAME_MAX_LEN
+    values: dict[str, str] = {
+        "first_name": sanitize_param(first_name(sale.customer_name), name_len, ascii_only=hard)
+        or "cliente",
+        "customer_name": sanitize_param(sale.customer_name or "", name_len, ascii_only=hard)
+        or "cliente",
+        "product": sanitize_param(sale.product_name or "", PARAM_MAX_LEN, ascii_only=hard)
+        or "produto",
+        "amount": fmt_brl(sale.amount_cents),
+        "amount_full": fmt_brl(sale.amount_cents, symbol=True),
+        "sale_id": sanitize_param(sale.sale_id, 64, ascii_only=hard),
+        "email": sanitize_param(sale.customer_email or "", EMAIL_MAX_LEN, ascii_only=hard)
+        or "seu e-mail",
+    }
+    return fit_body_budget([values.get(key, "") for key in step.params])
+
+
+def build_post_sale_payload(
+    sale: PostSale, step: StepConfig, *, to: str, hard: bool = False
+) -> dict[str, Any]:
+    """``POST /messages`` body for one post-sale step (fixed buttons need no component)."""
+    return step_template_payload(step, build_post_sale_params(sale, step, hard=hard), to=to)
+
+
+def step_template_preview(step: StepConfig, params: list[str]) -> str:
+    """Human-readable body stored in ``messages.body`` for one step of a sequence."""
     return f"[modelo {step.template_name}] " + " | ".join(params)
 
 
@@ -528,6 +576,18 @@ class GraphClient:
         if not target:
             return SendResult(ok=False, to="", error=GraphError(code=None, message="no phone"))
         body = build_cart_payload(cart, step, coupon, to=target, hard=hard, settings=self.settings)
+        return self._post_step(body, target)
+
+    def send_post_sale_template(
+        self, sale: PostSale, step: StepConfig, *, to: str | None = None, hard: bool = False
+    ) -> SendResult:
+        """Send step ``step`` of a post-sale follow-up to ``to`` (default: primary number)."""
+        target = to or sale.phone_e164 or sale.phone_alt
+        if not target:
+            return SendResult(ok=False, to="", error=GraphError(code=None, message="no phone"))
+        return self._post_step(build_post_sale_payload(sale, step, to=target, hard=hard), target)
+
+    def _post_step(self, body: dict[str, Any], target: str) -> SendResult:
         result = self._post_messages(body, target)
         body_component = next(
             (c for c in body["template"]["components"] if c.get("type") == "body"), None

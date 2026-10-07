@@ -21,9 +21,13 @@ from app.models import (
     Contact,
     JobState,
     Message,
+    MessageDirection,
     MessageStatus,
     Order,
     OrderStatus,
+    PostSale,
+    PostSaleJob,
+    PostSaleStatus,
     RecoveryJob,
     TemplateStatus,
     WebhookEvent,
@@ -347,6 +351,157 @@ def cart_status_label(status: str | None) -> str:
         CartStatus.OPEN.value: "abandonado",
         CartStatus.PIX_GENERATED.value: "gerou PIX",
         CartStatus.PURCHASED.value: "comprou",
+    }.get(status or "", status or "")
+
+
+# --- post-sale follow-up -------------------------------------------------------------
+
+# A customer message this soon after the first post-sale message counts as a reply.
+REPLY_WINDOW = timedelta(hours=72)
+
+
+@dataclass
+class PostSaleMetrics:
+    """The Pós-venda page's numbers for one period (sales approved since ``since``)."""
+
+    sales: int  # approved sales Kirvano reported
+    reachable: int  # ... with a usable phone number
+    in_sequence: int  # ... for which the follow-up was started
+    sent: int  # post-sale messages Meta accepted
+    delivered: int  # ... that reached the phone (delivered or read)
+    read: int  # ... that were opened
+    replied: int  # sales whose customer wrote back within 72 h of the first message
+    failed: int  # messages that could not be delivered
+    scheduled: int  # messages waiting to go out right now
+    reversed: int  # sales later refunded or charged back
+    sent_sales: int  # sales that received at least one message
+
+    @property
+    def read_rate(self) -> float:
+        """Read messages over sent messages (0–100)."""
+        return 100.0 * self.read / self.sent if self.sent else 0.0
+
+
+def post_sale_metrics(
+    session: Session, *, since: datetime | None = None, now: datetime | None = None
+) -> PostSaleMetrics:
+    """Counters for sales approved since ``since`` (all time when ``None``)."""
+    now = now or clock.utcnow()
+    sales = select(PostSale.id)
+    if since is not None:
+        sales = sales.where(PostSale.paid_at >= since)
+    sale_ids = sales.subquery()
+    in_period = PostSale.id.in_(select(sale_ids.c.id))
+    job_in_period = PostSaleJob.post_sale_id.in_(select(sale_ids.c.id))
+    sent_job = (job_in_period, PostSaleJob.state == JobState.SENT.value)
+
+    def with_status(*statuses: str):
+        return (
+            select(PostSaleJob.id)
+            .join(Message, Message.wa_message_id == PostSaleJob.wa_message_id)
+            .where(*sent_job, Message.status.in_(statuses))
+        )
+
+    return PostSaleMetrics(
+        sales=_count(session, select(PostSale.id).where(in_period)),
+        reachable=_count(
+            session, select(PostSale.id).where(in_period, PostSale.phone_e164.is_not(None))
+        ),
+        in_sequence=_count(
+            session, select(PostSaleJob.post_sale_id).where(job_in_period).distinct()
+        ),
+        sent=_count(session, select(PostSaleJob.id).where(*sent_job)),
+        delivered=_count(
+            session, with_status(MessageStatus.DELIVERED.value, MessageStatus.READ.value)
+        ),
+        read=_count(session, with_status(MessageStatus.READ.value)),
+        replied=_post_sale_replies(session, job_in_period),
+        failed=_count(
+            session,
+            select(PostSaleJob.id).where(job_in_period, PostSaleJob.state == JobState.FAILED.value),
+        ),
+        scheduled=_count(
+            session,
+            select(PostSaleJob.id).where(
+                job_in_period, PostSaleJob.state == JobState.SCHEDULED.value
+            ),
+        ),
+        reversed=_count(
+            session,
+            select(PostSale.id).where(
+                in_period,
+                PostSale.status.in_(
+                    [PostSaleStatus.REFUNDED.value, PostSaleStatus.CHARGEBACK.value]
+                ),
+            ),
+        ),
+        sent_sales=_count(session, select(PostSaleJob.post_sale_id).where(*sent_job).distinct()),
+    )
+
+
+def _post_sale_replies(session: Session, job_in_period) -> int:
+    """Sales whose customer sent us a message within REPLY_WINDOW of the first one.
+
+    Done in Python: a sale is matched to an inbound message by any of three number
+    forms, and the volumes (one shop's sales) are small.
+    """
+    rows = session.execute(
+        select(
+            PostSale.id,
+            PostSale.phone_e164,
+            PostSale.phone_alt,
+            PostSale.wa_id,
+            func.min(PostSaleJob.sent_at),
+        )
+        .join(PostSaleJob, PostSaleJob.post_sale_id == PostSale.id)
+        .where(job_in_period, PostSaleJob.state == JobState.SENT.value)
+        .group_by(PostSale.id, PostSale.phone_e164, PostSale.phone_alt, PostSale.wa_id)
+    ).all()
+    first_sent: dict[int, datetime] = {}
+    by_key: dict[str, list[int]] = {}
+    for sale_id, e164, alt, wa_id, sent_at in rows:
+        if sent_at is None:
+            continue
+        first_sent[sale_id] = sent_at
+        for key in {k for k in (e164, alt, wa_id) if k}:
+            by_key.setdefault(key, []).append(sale_id)
+    if not first_sent:
+        return 0
+    keys = sorted(by_key)
+    inbound = session.execute(
+        select(Message.phone, Message.wa_id, Message.created_at).where(
+            Message.direction == MessageDirection.IN.value,
+            Message.created_at >= min(first_sent.values()),
+            or_(Message.phone.in_(keys), Message.wa_id.in_(keys)),
+        )
+    ).all()
+    replied: set[int] = set()
+    for phone, wa_id, created_at in inbound:
+        for key in {k for k in (phone, wa_id) if k}:
+            for sale_id in by_key.get(key, ()):
+                start = first_sent[sale_id]
+                if start <= created_at <= start + REPLY_WINDOW:
+                    replied.add(sale_id)
+    return len(replied)
+
+
+def recent_post_sales(session: Session, limit: int = 50) -> list[PostSale]:
+    """Latest approved sales, newest first; ``sale.jobs`` is loaded in step order."""
+    return list(
+        session.execute(
+            select(PostSale)
+            .options(selectinload(PostSale.jobs))
+            .order_by(PostSale.paid_at.desc(), PostSale.id.desc())
+            .limit(limit)
+        ).scalars()
+    )
+
+
+def post_sale_status_label(status: str | None) -> str:
+    return {
+        PostSaleStatus.ACTIVE.value: "venda aprovada",
+        PostSaleStatus.REFUNDED.value: "reembolsada",
+        PostSaleStatus.CHARGEBACK.value: "chargeback",
     }.get(status or "", status or "")
 
 

@@ -158,3 +158,51 @@ link). Por isso o modelo não depende do formato de link da Kirvano. Com um úni
 Para uma 2ª ou 3ª mensagem, crie outro modelo (ex.: `carrinho_lembrete_v1`) e preencha a
 Mensagem 2/3 no painel. Duas mensagens do mesmo carrinho nunca saem com menos de 60 minutos
 entre elas.
+
+---
+
+## 10. Modelo do pós-venda — `pos_venda_v1`
+
+Usado pelas mensagens pós-venda (painel › **Pós-venda**): toda venda aprovada (PIX, cartão
+ou boleto) recebe de 1 a 3 mensagens nos horários configurados. Categoria **Utilidade**: é
+uma mensagem sobre a compra que o cliente acabou de fazer, sem oferta. Utilidade custa bem
+menos que Marketing; **oferta, cupom ou "aproveite também" no texto fazem a Meta classificar
+como Marketing** — o painel mostra a categoria depois de **Consultar status na Meta**.
+
+| Campo | Valor exato |
+|---|---|
+| **Categoria** | `Utilidade` |
+| **Nome** | `pos_venda_v1` (é o padrão do painel; outro nome → troque em Pós-venda) |
+| **Idioma** | `Português (BR)` — código `pt_BR` |
+
+**Corpo** (sugestão — o texto é do cliente; o que importa é a ORDEM das variáveis):
+
+```
+Olá {{1}}, sua compra de {{2}} foi confirmada! Enviamos as informações de acesso para o seu e-mail. Se precisar de qualquer ajuda, é só responder esta mensagem.
+```
+
+| Variável | Amostra | O que o sistema envia | Chave no painel |
+|---|---|---|---|
+| `{{1}}` | `Maria` | primeiro nome; `cliente` quando não há nome | `first_name` |
+| `{{2}}` | `A Jornada com meu Anjo` | nome do produto da venda | `product` |
+
+Ordem configurada por padrão: `first_name,product`. Outras chaves aceitas: `customer_name`,
+`amount` (`97,00`), `amount_full` (`R$ 97,00`), `sale_id` (código da venda), `email` (o
+e-mail da compra, para "enviamos o acesso para {{3}}").
+
+**Rodapé:** opcional.
+
+**Botão** (opcional) — *Chamada para ação › Acessar o site*, tipo **Estático**, com o link
+fixo da área de membros ou do suporte (ex.: texto `Acessar meu produto`). Botão estático não
+precisa de configuração no painel. Não use botão de link **dinâmico** neste modelo.
+
+Para uma 2ª ou 3ª mensagem (ex.: acompanhamento 3 dias depois), crie outro modelo, por exemplo
+`pos_venda_acompanhamento_v1`:
+
+```
+Olá {{1}}, tudo certo com o seu acesso a {{2}}? Se tiver qualquer dificuldade, responda esta mensagem que a gente ajuda.
+```
+
+e preencha a Mensagem 2 no painel (padrão: 4320 minutos = 3 dias). Duas mensagens da mesma
+venda nunca saem com menos de 60 minutos entre elas; reembolso, chargeback ou SAIR cancelam o
+que ainda não saiu.

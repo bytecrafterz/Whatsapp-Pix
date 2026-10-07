@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import clock, db
@@ -38,8 +39,23 @@ from app.cart import (
 )
 from app.config import Settings, get_settings
 from app.inbound import record_outbound_message, upsert_template_status
-from app.models import MessageKind, OptOutSource, Order, WorkerHeartbeat
+from app.models import (
+    Cart,
+    CartJob,
+    MessageKind,
+    OptOutSource,
+    Order,
+    PostSale,
+    PostSaleJob,
+    WorkerHeartbeat,
+)
 from app.optout import add_opt_out, cancel_jobs_for_phones
+from app.postsale import (
+    ClaimedPostSaleJob,
+    claim_due_post_sale_jobs,
+    reap_stale_post_sale_sending,
+    requeue_post_sale_job,
+)
 from app.scheduling import (
     DISABLED_RECHECK,
     AnyJob,
@@ -51,15 +67,15 @@ from app.scheduling import (
     reap_stale_sending,
     requeue,
 )
-from app.settings_store import SettingsStore
+from app.settings_store import SettingsStore, StepConfig
 from app.whatsapp import (
     ALERT_CODES,
     ErrorAction,
     GraphClient,
     SendResult,
-    cart_template_preview,
     classify_error,
     fail_reason_for,
+    step_template_preview,
     template_preview,
 )
 
@@ -112,9 +128,9 @@ class Worker:
         # but the next tick re-reads template_status (which _apply updated) instead of
         # trusting a stale in-process flag.
         self.template_blocked = False
-        # Same idea for the cart templates, per NAME: one paused cart template must not
-        # stop the PIX reminders, nor the other steps' templates.
-        self.cart_templates_blocked: set[str] = set()
+        # Same idea for the cart and post-sale templates, per NAME: one paused template
+        # must not stop the PIX reminders, nor the steps that use another template.
+        self.step_templates_blocked: set[str] = set()
         self._stop = False
         self._warned_unconfigured = False
 
@@ -187,11 +203,11 @@ class Worker:
             return now, "worker_stopping"
         return None
 
-    def _cart_kill_switch(self, now: datetime, item: ClaimedCartJob) -> tuple[datetime, str] | None:
-        """:meth:`_kill_switch` for cart steps: same token pause, per-template blocking."""
+    def _step_kill_switch(self, now: datetime, step: StepConfig) -> tuple[datetime, str] | None:
+        """:meth:`_kill_switch` for cart and post-sale steps: per-template blocking."""
         if self.paused_until is not None and now < self.paused_until:
             return self.paused_until, "token_invalid"
-        if item.step.template_name in self.cart_templates_blocked:
+        if step.template_name in self.step_templates_blocked:
             return now + DISABLED_RECHECK, "template_unavailable"
         if self._stop:
             return now, "worker_stopping"
@@ -202,7 +218,7 @@ class Worker:
         now = now or clock.utcnow()
         session = self._session()
         self.template_blocked = False
-        self.cart_templates_blocked = set()
+        self.step_templates_blocked = set()
         try:
             if self.paused_until and now < self.paused_until:
                 self.heartbeat(session, now, note="paused_token_invalid")
@@ -210,6 +226,7 @@ class Worker:
             self.heartbeat(session, now)
             reap_stale_sending(session, now=now)
             reap_stale_cart_sending(session, now=now)
+            reap_stale_post_sale_sending(session, now=now)
             if not self.client.configured:
                 if not self._warned_unconfigured:
                     log.error("META_ACCESS_TOKEN not configured — worker will not send")
@@ -238,7 +255,7 @@ class Worker:
                 session, store, now=now, limit=self.settings.worker_batch_size
             )
             for cart_item in cart_claimed:
-                blocked = self._cart_kill_switch(now, cart_item)
+                blocked = self._step_kill_switch(now, cart_item.step)
                 if blocked is not None:
                     retry_at, reason = blocked
                     postpone(session, cart_item.job, retry_at, reason=reason, now=now)
@@ -248,7 +265,23 @@ class Worker:
                     self._process_cart(session, store, cart_item, now)
                 except Exception:  # noqa: BLE001 - same isolation as the PIX batch
                     log.exception("cart job %s aborted; continuing", cart_item.job.id)
-            return len(claimed) + len(cart_claimed)
+            # Post-sale last: the customer already paid, so when the daily contact limit
+            # is close a pending PIX or a lost cart is worth more than a thank-you.
+            post_claimed = claim_due_post_sale_jobs(
+                session, store, now=now, limit=self.settings.worker_batch_size
+            )
+            for post_item in post_claimed:
+                blocked = self._step_kill_switch(now, post_item.step)
+                if blocked is not None:
+                    retry_at, reason = blocked
+                    postpone(session, post_item.job, retry_at, reason=reason, now=now)
+                    session.commit()
+                    continue
+                try:
+                    self._process_post_sale(session, post_item, now)
+                except Exception:  # noqa: BLE001 - same isolation as the PIX batch
+                    log.exception("post-sale job %s aborted; continuing", post_item.job.id)
+            return len(claimed) + len(cart_claimed) + len(post_claimed)
         finally:
             if self._owns_sessions:
                 session.close()
@@ -275,6 +308,20 @@ class Worker:
             item.job,
             deliver=lambda: self._deliver_cart(item, store),
             record=lambda outcome: self._apply_cart(session, store, item, outcome, now),
+            now=now,
+        )
+
+    def _process_post_sale(self, session: Session, item: ClaimedPostSaleJob, now: datetime) -> None:
+        self._send_and_record(
+            session,
+            item.job,
+            deliver=lambda: self._deliver_via(
+                lambda to=None, hard=False: self.client.send_post_sale_template(
+                    item.sale, item.step, to=to, hard=hard
+                ),
+                alt=item.sale.phone_alt,
+            ),
+            record=lambda outcome: self._apply_post_sale(session, item, outcome, now),
             now=now,
         )
 
@@ -511,30 +558,98 @@ class Worker:
         now: datetime,
     ) -> None:
         """Record the outcome of one cart step (no commit). Mirrors :meth:`_apply`."""
-        job, cart, step = item.job, item.cart, item.step
+        job, cart = item.job, item.cart
+        self._apply_step(
+            session,
+            job=job,
+            target=cart,
+            step=item.step,
+            outcome=outcome,
+            now=now,
+            requeue_job=lambda **kw: requeue_cart_job(session, job, cart, **kw),
+            flow="cart",
+            label=f"cart={cart.id}",
+            what=f"da mensagem {job.step} do carrinho {cart.id}",
+            template_alert=(
+                f"Modelo de carrinho {item.step.template_name} está {{status}} — "
+                "mensagens de carrinho com ele não serão enviadas."
+            ),
+        )
+
+    def _apply_post_sale(
+        self, session: Session, item: ClaimedPostSaleJob, outcome: DeliveryOutcome, now: datetime
+    ) -> None:
+        """Record the outcome of one post-sale step (no commit)."""
+        job, sale = item.job, item.sale
+        # Link the message to the PIX order when there is one, so the conversation
+        # shows it next to the reminder; a card sale has no order row.
+        order_id = session.execute(
+            select(Order.id).where(Order.sale_id == sale.sale_id)
+        ).scalar_one_or_none()
+        self._apply_step(
+            session,
+            job=job,
+            target=sale,
+            step=item.step,
+            outcome=outcome,
+            now=now,
+            requeue_job=lambda **kw: requeue_post_sale_job(session, job, sale, **kw),
+            flow="post_sale",
+            label=f"sale={sale.sale_id}",
+            what=f"da mensagem {job.step} do pós-venda da venda {sale.sale_id}",
+            template_alert=(
+                f"Modelo de pós-venda {item.step.template_name} está {{status}} — "
+                "mensagens de pós-venda com ele não serão enviadas."
+            ),
+            order_id=order_id,
+        )
+
+    def _apply_step(
+        self,
+        session: Session,
+        *,
+        job: CartJob | PostSaleJob,
+        target: Cart | PostSale,
+        step: StepConfig,
+        outcome: DeliveryOutcome,
+        now: datetime,
+        requeue_job: Callable[..., object],
+        flow: str,
+        label: str,
+        what: str,
+        template_alert: str,
+        order_id: int | None = None,
+    ) -> None:
+        """Shared recorder of one cart or post-sale step; mirrors :meth:`_apply`.
+
+        ``flow`` names the alert codes and log lines, ``label`` identifies the cart or
+        sale in the log, ``what`` and ``template_alert`` are the pt-BR alert texts.
+        """
         res = outcome.result
         if res.ok:
             mark_sent(
                 session, job, wa_id=res.wa_id, message_id=res.message_id, sent_to=res.to, now=now
             )
             if res.wa_id:
-                cart.wa_id = res.wa_id
-            cart.updated_at = now
+                target.wa_id = res.wa_id
+            target.updated_at = now
             # Same messages table as the PIX reminders: Meta's delivered/read webhooks
-            # land on this row, and the Carrinho page joins it through wa_message_id.
+            # land on this row, and the panel pages join it through wa_message_id.
             record_outbound_message(
                 session,
                 wa_id=res.wa_id or res.to,
                 phone=res.to,
                 message_id=res.message_id,
                 kind=MessageKind.TEMPLATE.value,
-                body=cart_template_preview(step, res.params),
+                body=step_template_preview(step, res.params),
                 template_name=step.template_name,
+                order_id=order_id,
                 now=now,
             )
             log.info(
-                "cart step sent cart=%s step=%s to=%s id=%s",
-                cart.id,
+                "%s step sent %s step=%s to=%s id=%s",
+                flow,
+                label,
                 job.step,
                 res.to,
                 res.message_id,
@@ -547,36 +662,35 @@ class Worker:
         action = outcome.action or ErrorAction.FAIL
         reason = outcome.reason or fail_reason_for(err)
         log.warning(
-            "cart step failed cart=%s step=%s code=%s action=%s: %s",
-            cart.id,
+            "%s step failed %s step=%s code=%s action=%s: %s",
+            flow,
+            label,
             job.step,
             code,
             action,
             text,
         )
+        context_key = f"{flow}_job_id"
 
         if action == ErrorAction.OPT_OUT:
             add_opt_out(
                 session,
-                phone=res.to or cart.phone_e164,
-                wa_id=cart.wa_id,
+                phone=res.to or target.phone_e164,
+                wa_id=target.wa_id,
                 source=OptOutSource.META_131050.value,
                 note=text[:200],
                 now=now,
             )
             cancel_jobs_for_phones(
                 session,
-                [res.to or cart.phone_e164, cart.phone_alt],
-                cart.wa_id,
+                [res.to or target.phone_e164, target.phone_alt],
+                target.wa_id,
                 reason="opted_out",
                 now=now,
             )
             mark_failed(session, job, reason="opted_out", error_code=code, error_text=text, now=now)
         elif action == ErrorAction.BACKOFF:
-            requeue_cart_job(
-                session,
-                job,
-                cart,
+            requeue_job(
                 error_code=code,
                 error_text=text,
                 now=now,
@@ -584,8 +698,8 @@ class Worker:
             )
         elif action == ErrorAction.NO_RETRY_24H:
             # 131049, Meta's per-user marketing cap. A PIX reminder waits a day and
-            # tries again; a lost cart is not worth that, and insisting is exactly
-            # what drags the number's quality rating down.
+            # tries again; a cart or post-sale step is not worth that, and insisting
+            # is exactly what drags the number's quality rating down.
             mark_failed(
                 session,
                 job,
@@ -603,12 +717,12 @@ class Worker:
                 session,
                 "token_invalid",
                 "Token do WhatsApp inválido ou expirado — envios pausados. Gere um novo token.",
-                context={"code": code, "cart_job_id": job.id},
+                context={"code": code, context_key: job.id},
                 now=now,
                 dedupe=True,
             )
         elif action == ErrorAction.TEMPLATE_UNAVAILABLE:
-            self.cart_templates_blocked.add(step.template_name)
+            self.step_templates_blocked.add(step.template_name)
             status = "PAUSED" if code == "132015" else "DISABLED"
             upsert_template_status(
                 session, step.template_name, step.language, status=status, reason=text, now=now
@@ -616,10 +730,9 @@ class Worker:
             mark_failed(session, job, reason=reason, error_code=code, error_text=text, now=now)
             record_alert(
                 session,
-                "cart_template_unavailable",
-                f"Modelo de carrinho {step.template_name} está {status} — "
-                "mensagens de carrinho com ele não serão enviadas.",
-                context={"code": code, "cart_job_id": job.id},
+                f"{flow}_template_unavailable",
+                template_alert.format(status=status),
+                context={"code": code, context_key: job.id},
                 now=now,
                 dedupe=True,
             )
@@ -629,8 +742,8 @@ class Worker:
                 record_alert(
                     session,
                     f"graph_{code}",
-                    f"Falha no envio da mensagem {job.step} do carrinho {cart.id}: {text}",
-                    context={"code": code, "cart_job_id": job.id, "reason": reason},
+                    f"Falha no envio {what}: {text}",
+                    context={"code": code, context_key: job.id, "reason": reason},
                     now=now,
                 )
 

@@ -23,7 +23,7 @@ Kirvano checkout → customer generates PIX → webhook → after a configurable
 - Event enums seen in the payload `event` field, with `status`:
   - `PIX_GENERATED` "PIX gerado" → status `PENDING` (this schedules the reminder)
   - `PIX_EXPIRED` "PIX expirado" → status `CANCELED`; carries `checkout_url` = https://pay.kirvano.com/recovery/<uuid> (link to generate a new PIX)
-  - `SALE_APPROVED` "Compra aprovada" → status `APPROVED`; `payment.finished_at`
+  - `SALE_APPROVED` "Compra aprovada" → status `APPROVED`; `payment.finished_at`. Since 2026-10-07 it also starts the post-sale follow-up for every approved sale, card or PIX (`app/postsale.py`, README §5 "Mensagens pós-venda"); `SALE_REFUNDED` / `SALE_CHARGEBACK` cancel what is still scheduled
   - `SALE_REFUSED`, `SALE_REFUNDED`, `SALE_CHARGEBACK`, `BANK_SLIP_GENERATED`, `BANK_SLIP_EXPIRED`, `SUBSCRIPTION_*` (ignore)
   - `ABANDONED_CART` (no sale_id, only checkout_id) — since 2026-10-07 the trigger of the abandoned-cart flow (`app/cart.py`, README §5 "Recuperação de carrinho abandonado"); `PIX_GENERATED` and `SALE_APPROVED` also close matching carts
   - Unknown events: store raw, log, 200.

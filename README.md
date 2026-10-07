@@ -171,6 +171,7 @@ descartado na entrada e o modo `log` da Kirvano guarda apenas **nomes** de cabe�
 | **Início** | pendentes agora, lembretes enviados hoje/7 dias, pagos depois do lembrete, cancelados por pagamento, expirados, falhas, últimos 50 pedidos |
 | **Configurações** | ligar/desligar, minutos de espera, horário silencioso, limite diário, nome/idioma do modelo, índice do botão, link do checkout |
 | **Carrinho** | recuperação de carrinho abandonado: ligar/desligar, cupom, 1 a 3 mensagens (horário, modelo, botão, parâmetros), resultados (enviadas, entregues, lidas, cliques, vendas e valor recuperados) e os últimos 50 carrinhos |
+| **Pós-venda** | mensagens depois da compra aprovada: ligar/desligar, 1 a 3 mensagens (horário, modelo, parâmetros), resultados (enviadas, entregues, lidas, respostas, reembolsos) e as últimas 50 vendas |
 | **Conversas** | respostas dos clientes; responder dentro da janela de 24 h |
 | **Descadastros** | quem pediu para sair; incluir/remover na mão |
 | **Eventos** | os últimos 100 webhooks recebidos, com o JSON cru |
@@ -215,6 +216,25 @@ em andamento, recebeu o lembrete do PIX nas últimas 24 h, já comprou o produto
 dias ou pediu para sair não recebe; horário silencioso e limite diário são os mesmos do PIX
 (o PIX tem prioridade). **Venda recuperada** = compra aprovada depois de pelo menos uma
 mensagem de carrinho; compra antes da mensagem conta à parte.
+
+### Mensagens pós-venda
+
+Vêm **desligadas**. Usam o evento **Compra aprovada**, que o webhook "Recuperação PIX" já
+recebe; marque também os eventos de **reembolso** e **chargeback** para que as mensagens
+pendentes de uma venda devolvida sejam canceladas.
+
+1. Crie o modelo de **Utilidade** do `docs/TEMPLATE.md` §10 e espere a aprovação.
+2. **Painel › Pós-venda**: modelo e horário de cada mensagem → marque **Mensagens pós-venda
+   ativadas** → salvar → **Consultar status na Meta** (a categoria deve ser `UTILITY`).
+3. Teste sem cliente real: `uv run python scripts/simulate_kirvano.py --event SALE_APPROVED
+   --method CREDIT_CARD --phone 55DDDSEUNUMERO --url https://api.jornadaanjo.cloud/webhooks/kirvano`
+   (`CREDIT_CARD` para não criar um pedido PIX falso nos números do Início).
+
+Regras: cada venda recebe a sequência uma única vez (por `sale_id`), PIX, cartão ou boleto;
+o horário conta da aprovação; reembolso, chargeback ou SAIR cancelam o que falta; uma mensagem
+que não conseguiu sair até 24 h depois do horário dela é descartada (nada de "obrigado pela
+compra" dias depois); horário silencioso e limite diário são os mesmos (pós-venda tem a menor
+prioridade). **Responderam** = o cliente escreveu em até 3 dias depois da primeira mensagem.
 
 ---
 

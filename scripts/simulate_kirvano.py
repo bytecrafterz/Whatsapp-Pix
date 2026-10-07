@@ -15,6 +15,7 @@ Usage::
 
     uv run python scripts/simulate_kirvano.py                       # PIX_GENERATED, localhost
     uv run python scripts/simulate_kirvano.py --event SALE_APPROVED --sale-id 5LZEB2GJ
+    uv run python scripts/simulate_kirvano.py --event SALE_APPROVED --method CREDIT_CARD
     uv run python scripts/simulate_kirvano.py --url https://api.jornadaanjo.cloud/webhooks/kirvano
     uv run python scripts/simulate_kirvano.py --print               # only show the JSON
 
@@ -124,12 +125,14 @@ def build_payload(
     checkout_url: str | None = None,
     ip: str = "200.152.1.115",
     tz_name: str = "America/Sao_Paulo",
+    method: str = "PIX",
 ) -> dict[str, Any]:
     """Build one Kirvano webhook body, byte-shaped like the real capture.
 
     ``created_at`` defaults to "now"; ``expires_at`` to created_at + 24 h, which
     is this merchant's real checkout setting (the vendor doc's 1 h example is not
-    his). PIX_EXPIRED carries the ``checkout_url`` recovery link.
+    his). PIX_EXPIRED carries the ``checkout_url`` recovery link. ``method`` other
+    than PIX makes a card/boleto sale: no PIX fields, and the server creates no order.
     """
     event = event.upper()
     now = created_at or datetime.now(tz=ZoneInfo(tz_name))
@@ -138,8 +141,9 @@ def build_payload(
     expires = expires_at or (now + timedelta(hours=expiry_hours))
     price = fmt_price(amount)
 
-    payment: dict[str, Any] = {"method": "PIX"}
-    if event in ("PIX_GENERATED", "SALE_APPROVED"):
+    method = method.upper()
+    payment: dict[str, Any] = {"method": method}
+    if event in ("PIX_GENERATED", "SALE_APPROVED") and method == "PIX":
         payment["qrcode"] = EMV
         payment["expires_at"] = fmt_local(expires, tz_name)
         # NOT a URL: Kirvano repeats the EMV string here. The PIX page must
@@ -229,7 +233,7 @@ def build_payload(
         "total_price": price,
         "contactEmail": CONTACT_EMAIL,
         "couponDiscount": 0,
-        "payment_method": "PIX",
+        "payment_method": method,
         "automaticDiscount": 0,
         "event_description": DESCRIPTION_BY_EVENT.get(event, event),
         "affiliateCommission": 0,
@@ -300,6 +304,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", default="Maria Souza de Oliveira")
     p.add_argument("--phone", default="5551994697674", help="55 + DDD + numero, so digitos")
     p.add_argument("--amount", type=float, default=97.0)
+    p.add_argument(
+        "--method",
+        default="PIX",
+        choices=("PIX", "CREDIT_CARD", "BANK_SLIP"),
+        help="forma de pagamento (CREDIT_CARD: venda de cartao, nao cria pedido PIX)",
+    )
     p.add_argument("--expiry-hours", type=float, default=24.0, help="validade do PIX (real: 24 h)")
     p.add_argument("--token", default=None, help="padrao: KIRVANO_WEBHOOK_TOKEN do ambiente")
     p.add_argument("--token-in", default="header", choices=("header", "body", "both", "none"))
@@ -323,6 +333,7 @@ def main(argv: list[str] | None = None, settings: Settings | None = None) -> int
         amount=args.amount,
         expiry_hours=args.expiry_hours,
         tz_name=settings.kirvano_tz,
+        method=args.method,
     )
 
     if args.print_only:

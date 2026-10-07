@@ -48,6 +48,8 @@ from app.models import (
     MessageKind,
     Order,
     OrderStatus,
+    PostSale,
+    PostSaleJob,
     RecoveryJob,
     TemplateStatus,
 )
@@ -57,9 +59,9 @@ from app.settings_store import SettingsStore
 
 log = logging.getLogger(__name__)
 
-# The mark_*/postpone transitions below only touch columns RecoveryJob and CartJob
-# share, so the cart worker path (app.cart) reuses them instead of copying them.
-AnyJob = RecoveryJob | CartJob
+# The mark_*/postpone transitions below only touch columns every job table shares, so
+# the cart (app.cart) and post-sale (app.postsale) worker paths reuse them.
+AnyJob = RecoveryJob | CartJob | PostSaleJob
 
 # Schedule-time clamp: fire at least this long before the PIX expires.
 EXPIRY_CLAMP_MARGIN = timedelta(minutes=3)
@@ -273,8 +275,8 @@ def recipients_last_24h(session: Session, now: datetime) -> set[str]:
     """Distinct recipients of template messages in the rolling 24h window.
 
     Includes jobs currently ``sending`` (claimed but not yet recorded) so a batch
-    cannot overshoot the limit between claim and record — PIX reminders and cart
-    messages alike, because Meta's limit is per number, not per flow.
+    cannot overshoot the limit between claim and record — PIX reminders, cart and
+    post-sale messages alike, because Meta's limit is per number, not per flow.
     """
     since = now - timedelta(hours=24)
     phones = session.execute(
@@ -295,7 +297,12 @@ def recipients_last_24h(session: Session, now: datetime) -> set[str]:
         .join(CartJob, CartJob.cart_id == Cart.id)
         .where(CartJob.state == JobState.SENDING.value)
     ).all()
-    for e164, alt in [*in_flight, *in_flight_carts]:
+    in_flight_post = session.execute(
+        select(PostSale.phone_e164, PostSale.phone_alt)
+        .join(PostSaleJob, PostSaleJob.post_sale_id == PostSale.id)
+        .where(PostSaleJob.state == JobState.SENDING.value)
+    ).all()
+    for e164, alt in [*in_flight, *in_flight_carts, *in_flight_post]:
         k = _recipient_key(e164 or alt)
         if k:
             keys.add(k)

@@ -75,19 +75,24 @@ from app.queries import (
     dashboard_counts,
     job_state_label,
     order_status_label,
+    post_sale_metrics,
+    post_sale_status_label,
     recent_carts,
     recent_events,
     recent_orders,
+    recent_post_sales,
     worker_heartbeat_age,
 )
 from app.settings_store import (
     CART_MAX_STEPS,
+    POST_MAX_DELAY_MINUTES,
+    POST_MAX_STEPS,
     SettingsStore,
     SettingValueError,
     get_settings_store,
 )
 from app.templating import templates
-from app.whatsapp import CART_PARAM_KEYS, TEMPLATE_PARAM_KEYS, GraphClient
+from app.whatsapp import CART_PARAM_KEYS, POST_PARAM_KEYS, TEMPLATE_PARAM_KEYS, GraphClient
 
 log = logging.getLogger("app.panel")
 
@@ -247,6 +252,11 @@ REASON_LABELS: dict[str, str] = {
     "previous_not_sent": "a mensagem anterior não foi enviada",
     "waiting_previous": "aguardando a mensagem anterior",
     "sequence_exists": "sequência já iniciada",
+    # post-sale follow-up (app.postsale); "refunded"/"chargeback" are shared above
+    "sale_refunded": "venda reembolsada",
+    "sale_chargeback": "chargeback na venda",
+    "sale_too_old": "aviso da venda chegou tarde demais",
+    "too_late": "o horário da mensagem já tinha passado",
 }
 
 
@@ -310,6 +320,8 @@ OK_MESSAGES: dict[str, str] = {
     "senha": "Senha alterada. Use a nova senha no próximo acesso.",
     "carrinho": "Configurações do carrinho salvas.",
     "carrinho_modelos": "Status dos modelos de carrinho atualizado com a Meta.",
+    "pos_venda": "Configurações do pós-venda salvas.",
+    "pos_venda_modelos": "Status dos modelos de pós-venda atualizado com a Meta.",
 }
 
 
@@ -330,6 +342,7 @@ templates.env.filters.setdefault("order_status_label", order_status_label)
 templates.env.filters.setdefault("job_badge", job_badge)
 templates.env.filters.setdefault("order_badge", order_badge)
 templates.env.filters.setdefault("cart_status_label", cart_status_label)
+templates.env.filters.setdefault("post_sale_status_label", post_sale_status_label)
 
 
 # --- rendering helpers ---------------------------------------------------------------
@@ -479,7 +492,7 @@ def validate_setting(key: str, value: str) -> str | None:
 
 def _config_context(store: SettingsStore, values: dict[str, str]) -> dict[str, Any]:
     return {
-        # The cart keys live on their own page (Carrinho).
+        # The cart and post-sale keys live on their own pages.
         "definitions": SettingsStore.group_definitions("pix"),
         "values": values,
         "ranges": PANEL_INT_RANGES,
@@ -1216,6 +1229,195 @@ def atualizar_modelos_carrinho(
             status_code=502,
         )
     return _redirect("/painel/carrinho", "carrinho_modelos")
+
+
+# --- Pós-venda (post-sale follow-up) -------------------------------------------------
+
+
+def _post_keys() -> list[str]:
+    return [d.key for d in SettingsStore.group_definitions("post")]
+
+
+def validate_post_settings(values: dict[str, str]) -> dict[str, str]:
+    """pt-BR errors keyed by field; empty = valid. Same rules as the Carrinho form."""
+    errors: dict[str, str] = {}
+
+    def as_int(key: str, low: int, high: int) -> int | None:
+        try:
+            number = int(values.get(key, "").strip())
+        except ValueError:
+            errors[key] = "Informe um número inteiro."
+            return None
+        if not low <= number <= high:
+            errors[key] = f"Use um número entre {low} e {high}."
+            return None
+        return number
+
+    steps = as_int("post_steps", 1, POST_MAX_STEPS) or 1
+    if not values.get("post_template_language", "").strip():
+        errors["post_template_language"] = "Informe o idioma, por exemplo pt_BR."
+    previous_delay: int | None = None
+    for i in range(1, POST_MAX_STEPS + 1):
+        enabled = i <= steps
+        delay = as_int(f"post_step{i}_delay_minutes", 0, POST_MAX_DELAY_MINUTES)
+        name = values.get(f"post_step{i}_template", "").strip()
+        if enabled and not name:
+            errors[f"post_step{i}_template"] = "Informe o nome do modelo desta mensagem."
+        elif name and not TEMPLATE_NAME_RE.match(name):
+            errors[f"post_step{i}_template"] = (
+                "Use apenas letras minúsculas, números e _ (igual ao nome na Meta)."
+            )
+        keys = [k.strip() for k in values.get(f"post_step{i}_params", "").split(",") if k.strip()]
+        unknown = [k for k in keys if k not in POST_PARAM_KEYS]
+        if unknown:
+            errors[f"post_step{i}_params"] = (
+                f"Parâmetro desconhecido: {', '.join(unknown)}. "
+                f"Use apenas: {', '.join(sorted(POST_PARAM_KEYS))}."
+            )
+        if not enabled:
+            continue
+        if delay is not None and previous_delay is not None:
+            if delay < previous_delay + MIN_STEP_GAP_MINUTES:
+                errors[f"post_step{i}_delay_minutes"] = (
+                    f"Precisa ser pelo menos {MIN_STEP_GAP_MINUTES} minutos depois da "
+                    f"mensagem {i - 1}."
+                )
+        previous_delay = delay if delay is not None else previous_delay
+    return errors
+
+
+def _pos_venda_page(
+    request: Request,
+    user: str,
+    session: Session,
+    store: SettingsStore,
+    client: GraphClient | None,
+    *,
+    values: dict[str, str] | None = None,
+    errors: dict[str, str] | None = None,
+    flash: str | None = None,
+    flash_kind: str = "ok",
+    status_code: int = 200,
+) -> Response:
+    now = clock.utcnow()
+    period_key = request.query_params.get("periodo", "30")
+    if period_key not in CART_PERIODS:
+        period_key = "30"
+    period_label, days = CART_PERIODS[period_key]
+    since = now - timedelta(days=days) if days else None
+    template_rows = {(row.name, row.language): row for row in all_template_status(session)}
+    heartbeat = worker_heartbeat_age(session, now=now)
+    return _render(
+        request,
+        "panel/pos_venda.html",
+        user,
+        active="pos_venda",
+        title="Pós-venda",
+        status_code=status_code,
+        flash=flash,
+        flash_kind=flash_kind,
+        metrics=post_sale_metrics(session, since=since, now=now),
+        period_key=period_key,
+        period_label=period_label,
+        periods=CART_PERIODS,
+        steps=store.post_step_configs(),
+        template_rows=template_rows,
+        badges=TEMPLATE_STATUS_BADGE,
+        sales=recent_post_sales(session, limit=50),
+        definitions=SettingsStore.group_definitions("post"),
+        values=values if values is not None else {k: store.get(k) for k in _post_keys()},
+        errors=errors or {},
+        store=store,
+        meta_configured=client is not None and client.configured,
+        worker_ok=heartbeat is not None and heartbeat < 60,
+        max_steps=POST_MAX_STEPS,
+        now=now,
+    )
+
+
+@router.get("/pos-venda", response_class=HTMLResponse)
+def pos_venda(
+    request: Request,
+    user: str = Depends(require_panel_auth),
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+    client: GraphClient | None = Depends(get_graph_client),
+) -> Response:
+    return _pos_venda_page(request, user, session, store, client)
+
+
+@router.post("/pos-venda", response_class=HTMLResponse)
+def salvar_pos_venda(
+    request: Request,
+    user: str = Depends(require_panel_auth),
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+    client: GraphClient | None = Depends(get_graph_client),
+    form: dict[str, str] = Depends(submitted_form),
+) -> Response:
+    error = check_mutation(request, user, form.get("nonce", ""))
+    if error:
+        return _error_page(request, user, error, status_code=403)
+    submitted = {k: form.get(k, "").strip() for k in _post_keys()}
+    # An unchecked checkbox is simply absent from the form body.
+    submitted["post_enabled"] = "true" if "post_enabled" in form else "false"
+    errors = validate_post_settings(submitted)
+    if not errors:
+        try:
+            store.set_many(submitted)
+        except SettingValueError as exc:
+            errors["__all__"] = str(exc)
+    if errors:
+        session.rollback()
+        return _pos_venda_page(
+            request,
+            user,
+            session,
+            store,
+            client,
+            values=submitted,
+            errors=errors,
+            flash="Corrija os campos destacados: nada foi salvo.",
+            flash_kind="bad",
+            status_code=400,
+        )
+    session.commit()
+    log.info("panel: post-sale settings updated by %s", user)
+    return _redirect("/painel/pos-venda", "pos_venda")
+
+
+@router.post("/pos-venda/modelos", response_class=HTMLResponse)
+def atualizar_modelos_pos_venda(
+    request: Request,
+    user: str = Depends(require_panel_auth),
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+    client: GraphClient | None = Depends(get_graph_client),
+    nonce: str = Form(""),
+) -> Response:
+    error = check_mutation(request, user, nonce)
+    if error:
+        return _error_page(request, user, error, status_code=403)
+    names = sorted({s.template_name for s in store.post_step_configs() if s.template_name})
+    problems = []
+    for name in names:
+        result = refresh_template_status(session, client, name, store.post_template_language)
+        if not result.ok:
+            problems.append(result.message)
+    # Keep what DID refresh even when another template failed.
+    session.commit()
+    if problems:
+        return _pos_venda_page(
+            request,
+            user,
+            session,
+            store,
+            client,
+            flash=" ".join(problems),
+            flash_kind="bad",
+            status_code=502,
+        )
+    return _redirect("/painel/pos-venda", "pos_venda_modelos")
 
 
 # --- mount hook ----------------------------------------------------------------------

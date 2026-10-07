@@ -15,7 +15,7 @@ from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app import clock
-from app.models import CartJob, JobState, OptOut, Order, RecoveryJob
+from app.models import CartJob, JobState, OptOut, Order, PostSaleJob, RecoveryJob
 from app.phone import normalize_br
 
 log = logging.getLogger(__name__)
@@ -107,9 +107,10 @@ def cancel_jobs_for_phones(
     *,
     reason: str = "opted_out",
     now: datetime | None = None,
-) -> list[RecoveryJob | CartJob]:
-    """Cancel every *scheduled* job for this phone/wa_id: PIX reminders, then cart steps."""
+) -> list[RecoveryJob | CartJob | PostSaleJob]:
+    """Cancel every *scheduled* job for this phone/wa_id: PIX reminders, cart, post-sale."""
     now = now or clock.utcnow()
+    phones = list(phones)  # read once per flow below
     forms = _all_forms(phones, wa_id)
     conds = []
     if forms:
@@ -154,9 +155,11 @@ def cancel_jobs_for_phones(
         job.updated_at = now
         jobs.append(job)
     session.flush()
-    # An opt-out stops the abandoned-cart sequence too. Local import: app.cart imports
-    # this module (is_opted_out). Cart steps are appended after the PIX jobs.
+    # An opt-out stops the abandoned-cart and post-sale sequences too. Local imports:
+    # both modules import this one (is_opted_out). Appended after the PIX jobs.
     from app.cart import cancel_cart_jobs_for_phones
+    from app.postsale import cancel_post_sale_jobs_for_phones
 
     cart_jobs = cancel_cart_jobs_for_phones(session, phones, wa_id, reason=reason, now=now)
-    return [*jobs, *cart_jobs]
+    post_jobs = cancel_post_sale_jobs_for_phones(session, phones, wa_id, reason=reason, now=now)
+    return [*jobs, *cart_jobs, *post_jobs]

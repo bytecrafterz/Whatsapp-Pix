@@ -40,7 +40,8 @@ class SettingDef:
     help: str = ""  # pt-BR hint for the panel
     min: int | None = None
     max: int | None = None
-    # Which panel page edits it: "pix" → Configurações, "cart" → Carrinho.
+    # Which panel page edits it: "pix" → Configurações, "cart" → Carrinho,
+    # "post" → Pós-venda.
     group: str = "pix"
 
 
@@ -56,8 +57,8 @@ CART_MAX_DELAY_MINUTES = 3 * 24 * 60
 
 
 @dataclass(frozen=True)
-class CartStepConfig:
-    """Everything the worker needs to send step ``step`` of a cart sequence."""
+class StepConfig:
+    """Everything the worker needs to send step ``step`` of a sequence (cart or post-sale)."""
 
     step: int
     delay_minutes: int
@@ -65,6 +66,50 @@ class CartStepConfig:
     language: str
     url_button_index: int  # -1 = the template has no URL button
     params: tuple[str, ...]
+
+
+CartStepConfig = StepConfig  # the name the cart code grew up with
+
+
+# --- post-sale follow-up ---------------------------------------------------------------
+
+POST_MAX_STEPS = 3
+POST_DEFAULT_DELAYS = (10, 3 * 24 * 60, 7 * 24 * 60)  # minutes after the sale is approved
+POST_DEFAULT_TEMPLATE = "pos_venda_v1"
+POST_DEFAULT_PARAMS = "first_name,product"
+POST_MAX_DELAY_MINUTES = 30 * 24 * 60
+
+
+def _post_step_defs(i: int) -> tuple[SettingDef, ...]:
+    return (
+        SettingDef(
+            f"post_step{i}_delay_minutes",
+            "int",
+            lambda s, i=i: str(POST_DEFAULT_DELAYS[i - 1]),
+            f"Mensagem {i}: minutos após a aprovação",
+            "Contados a partir da aprovação da venda (1440 = 1 dia, 10080 = 7 dias).",
+            min=0,
+            max=POST_MAX_DELAY_MINUTES,
+            group="post",
+        ),
+        SettingDef(
+            f"post_step{i}_template",
+            "str",
+            lambda s, i=i: POST_DEFAULT_TEMPLATE if i == 1 else "",
+            f"Mensagem {i}: nome do modelo",
+            "Nome exato do modelo aprovado no WhatsApp Manager (categoria Utilidade).",
+            group="post",
+        ),
+        SettingDef(
+            f"post_step{i}_params",
+            "str",
+            lambda s: POST_DEFAULT_PARAMS,
+            f"Mensagem {i}: ordem dos parâmetros",
+            "Chaves separadas por vírgula: first_name, customer_name, product, amount, "
+            "amount_full, sale_id, email. Deixe vazio se o modelo não tiver variáveis.",
+            group="post",
+        ),
+    )
 
 
 def _cart_step_defs(i: int) -> tuple[SettingDef, ...]:
@@ -232,6 +277,35 @@ SETTING_DEFS: tuple[SettingDef, ...] = (
         group="cart",
     ),
     *(d for i in range(1, CART_MAX_STEPS + 1) for d in _cart_step_defs(i)),
+    # --- post-sale follow-up (panel page "Pós-venda") ---
+    SettingDef(
+        "post_enabled",
+        "bool",
+        # Off until the client's template is approved and configured.
+        lambda s: "false",
+        "Mensagens pós-venda ativadas",
+        "Quando desligadas, nenhuma venda aprovada recebe mensagem.",
+        group="post",
+    ),
+    SettingDef(
+        "post_steps",
+        "int",
+        lambda s: "1",
+        "Quantidade de mensagens",
+        "Quantas mensagens cada venda aprovada recebe, na ordem abaixo (1 a 3).",
+        min=1,
+        max=POST_MAX_STEPS,
+        group="post",
+    ),
+    SettingDef(
+        "post_template_language",
+        "str",
+        lambda s: s.template_language,
+        "Idioma dos modelos",
+        "Código do idioma dos modelos de pós-venda, por exemplo pt_BR.",
+        group="post",
+    ),
+    *(d for i in range(1, POST_MAX_STEPS + 1) for d in _post_step_defs(i)),
 )
 
 SETTING_KEYS: tuple[str, ...] = tuple(d.key for d in SETTING_DEFS)
@@ -284,19 +358,30 @@ def _normalise(defn: SettingDef, value: object) -> str:
             return value.strftime("%H:%M")
         return parse_time(str(value)).strftime("%H:%M")
     text = str(value if value is not None else "").strip()
-    if defn.key in ("template_name", "template_language", "cart_template_language") and not text:
+    if (
+        defn.key
+        in (
+            "template_name",
+            "template_language",
+            "cart_template_language",
+            "post_template_language",
+        )
+        and not text
+    ):
         raise SettingValueError(f"{defn.label} não pode ficar vazio")
-    if defn.key.startswith("cart_step") and defn.key.endswith("_params"):
-        from app.whatsapp import CART_PARAM_KEYS  # local: whatsapp imports this module
+    if defn.key.startswith(("cart_step", "post_step")) and defn.key.endswith("_params"):
+        # Local import: whatsapp imports this module.
+        from app.whatsapp import CART_PARAM_KEYS, POST_PARAM_KEYS
 
+        allowed = CART_PARAM_KEYS if defn.key.startswith("cart_") else POST_PARAM_KEYS
         keys = [p.strip() for p in text.split(",") if p.strip()]
-        # Empty IS allowed here: a cart template with no variables takes no body
-        # component at all (see whatsapp.build_cart_payload).
-        unknown = [k for k in keys if k not in CART_PARAM_KEYS]
+        # Empty IS allowed here: a template with no variables takes no body component
+        # at all (see whatsapp.step_template_payload).
+        unknown = [k for k in keys if k not in allowed]
         if unknown:
             raise SettingValueError(
                 f"{defn.label}: parâmetro desconhecido {', '.join(unknown)} "
-                f"(use: {', '.join(sorted(CART_PARAM_KEYS))})"
+                f"(use: {', '.join(sorted(allowed))})"
             )
         return ",".join(keys)
     if defn.key == "template_params":
@@ -468,6 +553,42 @@ class SettingsStore:
     def cart_step_configs(self) -> list[CartStepConfig]:
         """The ENABLED steps, in order (``cart_steps`` of them)."""
         return [self.cart_step(i) for i in range(1, self.cart_steps + 1)]
+
+    # --- post-sale follow-up ----------------------------------------------------------
+
+    @property
+    def post_enabled(self) -> bool:
+        return parse_bool(self.get("post_enabled"))
+
+    @property
+    def post_steps(self) -> int:
+        return max(1, min(POST_MAX_STEPS, int(self.get("post_steps"))))
+
+    @property
+    def post_template_language(self) -> str:
+        return self.get("post_template_language")
+
+    def post_step(self, step: int) -> StepConfig:
+        """Configuration of post-sale step ``step`` (1-based), enabled or not.
+
+        No dynamic URL button: a post-sale template's link (members area, support)
+        is the same for everyone, so it is a fixed button that takes no parameter.
+        """
+        if not 1 <= step <= POST_MAX_STEPS:
+            raise KeyError(step)
+        params = self.get(f"post_step{step}_params")
+        return StepConfig(
+            step=step,
+            delay_minutes=int(self.get(f"post_step{step}_delay_minutes")),
+            template_name=self.get(f"post_step{step}_template").strip(),
+            language=self.post_template_language,
+            url_button_index=-1,
+            params=tuple(p.strip() for p in params.split(",") if p.strip()),
+        )
+
+    def post_step_configs(self) -> list[StepConfig]:
+        """The ENABLED post-sale steps, in order (``post_steps`` of them)."""
+        return [self.post_step(i) for i in range(1, self.post_steps + 1)]
 
     @classmethod
     def group_definitions(cls, group: str) -> list[SettingDef]:
