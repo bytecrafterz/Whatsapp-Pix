@@ -37,7 +37,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app import clock
-from app.models import Contact, Message, Order, WebhookEvent
+from app.models import Cart, Contact, Message, Order, WebhookEvent
 
 log = logging.getLogger("app.retention")
 
@@ -55,6 +55,7 @@ class PurgeResult:
     messages_anonymised: int = 0
     contacts_anonymised: int = 0
     events_deleted: int = 0
+    carts_anonymised: int = 0
 
     @property
     def total(self) -> int:
@@ -63,6 +64,7 @@ class PurgeResult:
             + self.messages_anonymised
             + self.contacts_anonymised
             + self.events_deleted
+            + self.carts_anonymised
         )
 
     def summary(self) -> str:
@@ -71,7 +73,8 @@ class PurgeResult:
             f"{self.orders_anonymised} pedidos anonimizados, "
             f"{self.messages_anonymised} mensagens anonimizadas, "
             f"{self.contacts_anonymised} contatos anonimizados, "
-            f"{self.events_deleted} eventos apagados"
+            f"{self.events_deleted} eventos apagados, "
+            f"{self.carts_anonymised} carrinhos anonimizados"
         )
 
 
@@ -171,6 +174,44 @@ def purge(
             update(Contact)
             .where(Contact.wa_id.in_(contact_ids))
             .values(profile_name=None, phone=None)
+        )
+
+    # --- abandoned carts -------------------------------------------------------
+    # Same rule as orders: identity goes, the counters (status, amounts, recovered,
+    # clicks) stay so the Carrinho page's history keeps adding up.
+    cart_ids = list(
+        session.execute(
+            select(Cart.id).where(
+                Cart.abandoned_at < cutoff,
+                or_(
+                    Cart.customer_name.is_not(None),
+                    Cart.customer_email.is_not(None),
+                    Cart.phone_raw.is_not(None),
+                    Cart.phone_e164.is_not(None),
+                    Cart.phone_alt.is_not(None),
+                    Cart.wa_id.is_not(None),
+                    Cart.consent_ip.is_not(None),
+                    Cart.checkout_url.is_not(None),
+                ),
+            )
+        ).scalars()
+    )
+    result.carts_anonymised = len(cart_ids)
+    if cart_ids and not dry_run:
+        session.execute(
+            update(Cart)
+            .where(Cart.id.in_(cart_ids))
+            .values(
+                customer_name=None,
+                customer_email=None,
+                phone_raw=None,
+                phone_e164=None,
+                phone_alt=None,
+                wa_id=None,
+                consent_ip=None,
+                checkout_url=None,
+                updated_at=now,
+            )
         )
 
     # --- webhook events -------------------------------------------------------

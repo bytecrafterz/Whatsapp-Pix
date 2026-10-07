@@ -31,6 +31,9 @@ def test_normalize_br_mobile_and_landline(raw, primary, alternate, kind):
 def test_normalize_non_br_and_garbage():
     other = normalize_br("+1 415 555 2671 0")  # 12 digits not starting with 55
     assert other is not None and other.country == "other" and other.alternate is None
+    # Longer than E.164's 15 digits is not a phone number (and would overflow the
+    # 20-character phone columns on PostgreSQL).
+    assert normalize_br("5511987654321" + "9" * 60) is None
     assert normalize_br("") is None
     assert normalize_br(None) is None
     assert normalize_br("123") is None

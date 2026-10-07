@@ -40,6 +40,8 @@ from sqlalchemy.orm import Session
 from app import clock
 from app.format import SP_TZ
 from app.models import (
+    Cart,
+    CartJob,
     JobState,
     Message,
     MessageDirection,
@@ -54,6 +56,10 @@ from app.phone import normalize_br
 from app.settings_store import SettingsStore
 
 log = logging.getLogger(__name__)
+
+# The mark_*/postpone transitions below only touch columns RecoveryJob and CartJob
+# share, so the cart worker path (app.cart) reuses them instead of copying them.
+AnyJob = RecoveryJob | CartJob
 
 # Schedule-time clamp: fire at least this long before the PIX expires.
 EXPIRY_CLAMP_MARGIN = timedelta(minutes=3)
@@ -267,7 +273,8 @@ def recipients_last_24h(session: Session, now: datetime) -> set[str]:
     """Distinct recipients of template messages in the rolling 24h window.
 
     Includes jobs currently ``sending`` (claimed but not yet recorded) so a batch
-    cannot overshoot the limit between claim and record.
+    cannot overshoot the limit between claim and record — PIX reminders and cart
+    messages alike, because Meta's limit is per number, not per flow.
     """
     since = now - timedelta(hours=24)
     phones = session.execute(
@@ -283,7 +290,12 @@ def recipients_last_24h(session: Session, now: datetime) -> set[str]:
         .join(RecoveryJob, RecoveryJob.order_id == Order.id)
         .where(RecoveryJob.state == JobState.SENDING.value)
     ).all()
-    for e164, alt in in_flight:
+    in_flight_carts = session.execute(
+        select(Cart.phone_e164, Cart.phone_alt)
+        .join(CartJob, CartJob.cart_id == Cart.id)
+        .where(CartJob.state == JobState.SENDING.value)
+    ).all()
+    for e164, alt in [*in_flight, *in_flight_carts]:
         k = _recipient_key(e164 or alt)
         if k:
             keys.add(k)
@@ -434,7 +446,7 @@ def reap_stale_sending(session: Session, *, now: datetime | None = None) -> int:
 
 def mark_sent(
     session: Session,
-    job: RecoveryJob,
+    job: AnyJob,
     *,
     wa_id: str | None,
     message_id: str | None,
@@ -456,7 +468,7 @@ def mark_sent(
 
 def mark_failed(
     session: Session,
-    job: RecoveryJob,
+    job: AnyJob,
     *,
     reason: str,
     error_code: str | None = None,
@@ -474,7 +486,7 @@ def mark_failed(
 
 
 def mark_skipped(
-    session: Session, job: RecoveryJob, reason: str, *, now: datetime | None = None
+    session: Session, job: AnyJob, reason: str, *, now: datetime | None = None
 ) -> None:
     now = now or clock.utcnow()
     job.state = JobState.SKIPPED.value
@@ -485,7 +497,7 @@ def mark_skipped(
 
 def postpone(
     session: Session,
-    job: RecoveryJob,
+    job: AnyJob,
     run_at: datetime,
     *,
     reason: str | None = None,

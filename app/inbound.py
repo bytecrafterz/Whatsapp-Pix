@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app import clock
 from app.alerts import record_alert
 from app.models import (
+    CartJob,
     Contact,
     JobState,
     Message,
@@ -350,6 +351,11 @@ def record_status(
         job = session.execute(
             select(RecoveryJob).where(RecoveryJob.wa_message_id == st.message_id)
         ).scalar_one_or_none()
+        if job is None:
+            # Not a PIX reminder: maybe a step of an abandoned-cart sequence.
+            job = session.execute(
+                select(CartJob).where(CartJob.wa_message_id == st.message_id)
+            ).scalar_one_or_none()
         if job is not None and job.state == JobState.SENT.value:
             job.error_code = msg.error_code
             job.error_text = msg.error_text

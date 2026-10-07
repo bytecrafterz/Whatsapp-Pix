@@ -1,0 +1,187 @@
+{% extends "panel/layout.html" %}
+
+{# One settings field, same markup as Configurações. #}
+{% macro campo(d) %}
+  {% set valor = values.get(d.key, '') %}
+  {% set erro = errors.get(d.key) %}
+  {% if d.kind == 'bool' %}
+    <label class="check" for="{{ d.key }}">
+      <input type="checkbox" id="{{ d.key }}" name="{{ d.key }}" value="true"
+             {% if valor == 'true' %}checked{% endif %}>
+      {{ d.label }}
+    </label>
+    <span class="help">{{ d.help }}</span>
+  {% else %}
+    <label for="{{ d.key }}">{{ d.label }}
+      <span class="help">{{ d.help }}</span>
+    </label>
+    {% if d.kind == 'int' %}
+      <input type="number" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+             {% if d.min is not none %}min="{{ d.min }}"{% endif %}
+             {% if d.max is not none %}max="{{ d.max }}"{% endif %}
+             step="1" required class="{% if erro %}invalid{% endif %}">
+    {% else %}
+      <input type="text" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
+             class="{% if erro %}invalid{% endif %}">
+    {% endif %}
+  {% endif %}
+  {% if erro %}<p class="field-error">{{ erro }}</p>{% endif %}
+{% endmacro %}
+
+{% block painel %}
+<div class="card">
+  <div class="row-actions">
+    {% if store.cart_enabled %}
+      <span class="badge ok">recuperação de carrinho ativada</span>
+    {% else %}
+      <span class="badge bad">recuperação de carrinho desligada</span>
+    {% endif %}
+    <span class="muted">
+      {{ steps|length }} mensage{{ 'm' if steps|length == 1 else 'ns' }} por carrinho
+      {% if store.cart_coupon %}· cupom <strong>{{ store.cart_coupon }}</strong>{% endif %}
+    </span>
+    {% if not worker_ok %}<span class="badge bad">robô de envio parado</span>{% endif %}
+  </div>
+  <p class="muted" style="margin:0.5rem 0 0">
+    Quando a Kirvano avisa um carrinho abandonado, o cliente recebe as mensagens abaixo
+    no horário configurado. Se ele gerar o PIX ou comprar antes, as mensagens que faltam
+    são canceladas na hora. Quem pediu para sair, quem está com PIX em andamento ou já
+    recebeu o lembrete do PIX não recebe mensagem de carrinho.
+  </p>
+</div>
+
+<div class="card">
+  <div class="row-actions" style="justify-content:space-between">
+    <h2 style="margin:0">Resultados · {{ period_label }}</h2>
+    <span class="row-actions">
+      {% for key, (label, _) in periods.items() %}
+        {% if key == period_key %}<strong>{{ label }}</strong>
+        {% else %}<a href="/painel/carrinho?periodo={{ key }}">{{ label }}</a>{% endif %}
+      {% endfor %}
+    </span>
+  </div>
+</div>
+<div class="grid">
+  <div class="stat"><div class="num">{{ metrics.abandoned }}</div><div class="lbl">carrinhos abandonados</div></div>
+  <div class="stat"><div class="num">{{ metrics.sent }}</div><div class="lbl">mensagens enviadas</div></div>
+  <div class="stat"><div class="num">{{ metrics.delivered }}</div><div class="lbl">entregues</div></div>
+  <div class="stat"><div class="num">{{ metrics.read }}</div><div class="lbl">lidas</div></div>
+  <div class="stat"><div class="num">{{ metrics.clicked }}</div><div class="lbl">clicaram no botão</div></div>
+  <div class="stat"><div class="num">{{ metrics.recovered }}</div><div class="lbl">vendas recuperadas</div></div>
+  <div class="stat"><div class="num">{{ metrics.recovered_cents|brl_symbol }}</div><div class="lbl">valor recuperado</div></div>
+  <div class="stat"><div class="num">{{ ('%.1f'|format(metrics.recovery_rate))|replace('.', ',') }}%</div><div class="lbl">taxa de recuperação</div></div>
+  <div class="stat"><div class="num">{{ metrics.scheduled }}</div><div class="lbl">mensagens agendadas</div></div>
+  <div class="stat"><div class="num">{{ metrics.purchased_without_message }}</div><div class="lbl">compraram antes da mensagem</div></div>
+</div>
+<p class="muted">
+  Venda recuperada = compra aprovada depois de o cliente receber pelo menos uma mensagem
+  de carrinho. A taxa é sobre os {{ metrics.sent_carts }} carrinhos que receberam mensagem.
+</p>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Modelos das mensagens</h2>
+  <div class="table-wrap">
+    <table class="stack">
+      <thead><tr><th>Mensagem</th><th>Quando</th><th>Modelo</th><th>Status na Meta</th><th>Categoria</th></tr></thead>
+      <tbody>
+      {% for s in steps %}
+        {% set row = template_rows.get((s.template_name, s.language)) %}
+        <tr>
+          <td data-rotulo="Mensagem">{{ s.step }}</td>
+          <td data-rotulo="Quando">{{ s.delay_minutes }} min após o abandono</td>
+          <td data-rotulo="Modelo">{{ s.template_name or '—' }} <span class="muted">({{ s.language }})</span></td>
+          <td data-rotulo="Status na Meta">
+            {% if row %}<span class="badge {{ badges.get(row.status, '') }}">{{ row.status or 'desconhecido' }}</span>
+            {% else %}<span class="muted">não consultado</span>{% endif %}
+          </td>
+          <td data-rotulo="Categoria">{{ row.category if row and row.category else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" action="/painel/carrinho/modelos" style="margin-top:0.75rem">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <button class="btn secondary" type="submit" {% if not meta_configured %}disabled{% endif %}>
+      Consultar status na Meta
+    </button>
+  </form>
+</div>
+
+<form class="card" method="post" action="/painel/carrinho">
+  <h2>Configurações do carrinho</h2>
+  <input type="hidden" name="nonce" value="{{ nonce }}">
+  {% if errors.get('__all__') %}<p class="field-error">{{ errors['__all__'] }}</p>{% endif %}
+
+  {% for d in definitions if not d.key.startswith('cart_step') %}
+    {{ campo(d) }}
+  {% endfor %}
+
+  {% for i in range(1, max_steps + 1) %}
+    <fieldset style="margin-top:1rem; border:1px solid var(--line); border-radius:10px; padding:0.5rem 0.9rem">
+      <legend><strong>Mensagem {{ i }}</strong>
+        <span class="muted">{% if i > (values.get('cart_steps', '1')|int) %}(desligada — aumente a quantidade de mensagens){% endif %}</span>
+      </legend>
+      {% for d in definitions if d.key.startswith('cart_step' ~ i ~ '_') %}
+        {{ campo(d) }}
+      {% endfor %}
+    </fieldset>
+  {% endfor %}
+
+  <p class="muted" style="margin-top:1rem">
+    O botão do modelo deve ser de link dinâmico com a URL
+    <code>{{ button_url }}</code>: o sistema leva o cliente de volta ao checkout dele e conta
+    o clique.
+  </p>
+  <p style="margin-top:1rem"><button class="btn" type="submit">Salvar</button></p>
+</form>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Últimos 50 carrinhos</h2>
+  {% if not carts %}
+    <p class="muted">Nenhum carrinho abandonado recebido ainda. Confira se o evento
+      “Carrinho abandonado” está marcado no webhook da Kirvano.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead>
+        <tr><th>Quando</th><th>Cliente</th><th>Produto</th><th>Situação</th><th>Mensagens</th><th>Cliques</th></tr>
+      </thead>
+      <tbody>
+      {% for cart in carts %}
+        <tr>
+          <td data-rotulo="Quando" class="nowrap">{{ cart.abandoned_at|dt_sp_full }}</td>
+          <td data-rotulo="Cliente">
+            {{ first_name(cart.customer_name) }}
+            <span class="muted">{{ cart.phone_e164 or cart.phone_raw or 'sem telefone' }}</span>
+          </td>
+          <td data-rotulo="Produto">
+            {{ cart.product_name or '—' }}
+            {% if cart.amount_cents %}<span class="muted">{{ cart.amount_cents|brl_symbol }}</span>{% endif %}
+          </td>
+          <td data-rotulo="Situação">
+            {{ cart.status|cart_status_label }}
+            {% if cart.recovered %}<span class="badge ok">recuperado {{ cart.converted_amount_cents|brl_symbol }}</span>{% endif %}
+            {% if cart.reason %}<span class="muted">{{ cart.reason|reason_label }}</span>{% endif %}
+          </td>
+          <td data-rotulo="Mensagens">
+            {% for job in cart.jobs %}
+              <div>
+                {{ job.step }}: <span class="badge {{ job.state|job_badge }}">{{ job.state|job_state_label }}</span>
+                {% if job.state == 'scheduled' %}<span class="muted">para {{ job.run_at|dt_sp_full }}</span>
+                {% elif job.sent_at %}<span class="muted">em {{ job.sent_at|dt_sp_full }}</span>{% endif %}
+                {% if job.reason and job.state != 'scheduled' %}<span class="muted">{{ job.reason|reason_label }}</span>{% endif %}
+              </div>
+            {% else %}
+              <span class="muted">nenhuma</span>
+            {% endfor %}
+          </td>
+          <td data-rotulo="Cliques">{{ cart.clicks or 0 }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

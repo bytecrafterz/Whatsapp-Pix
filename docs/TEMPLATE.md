@@ -108,3 +108,53 @@ No painel, em **Configurações**:
 | Ordem dos parâmetros | `template_params` | chaves válidas: `first_name`, `customer_name`, `sale_id`, `amount`, `amount_full`, `expiry`, `product`, `page_url` |
 
 Vale a mudança no próximo envio, sem reiniciar nada.
+
+---
+
+## 9. Modelo do carrinho abandonado — `carrinho_abandonado_v1`
+
+Usado pela recuperação de carrinho (painel › **Carrinho**). Diferente do modelo do PIX,
+este é **Marketing**: oferece um cupom para quem nem chegou a gerar o PIX. A Meta cobra mais
+por mensagem (~R$ 0,32) e aplica o limite de marketing por usuário (`#131049`); o sistema não
+reenvia nesse caso.
+
+| Campo | Valor exato |
+|---|---|
+| **Categoria** | `Marketing` |
+| **Nome** | `carrinho_abandonado_v1` (é o padrão do painel; outro nome → troque em Carrinho) |
+| **Idioma** | `Português (BR)` — código `pt_BR` |
+
+**Corpo** (sugestão — o texto é do cliente; o que importa é a ORDEM das variáveis):
+
+```
+Olá {{1}}, vimos que você começou a garantir {{2}} e não finalizou. Separamos um cupom especial para você: {{3}}. É só usar no checkout, ele vale por pouco tempo.
+```
+
+| Variável | Amostra | O que o sistema envia | Chave no painel |
+|---|---|---|---|
+| `{{1}}` | `Maria` | primeiro nome; `cliente` quando não há nome | `first_name` |
+| `{{2}}` | `A Jornada com meu Anjo` | nome do produto do carrinho | `product` |
+| `{{3}}` | `VOLTA10` | o campo **Cupom** do painel (troca sem nova aprovação) | `coupon` |
+
+Ordem configurada por padrão: `first_name,product,coupon`. Outras chaves aceitas: `customer_name`,
+`amount` (`97,00`), `amount_full` (`R$ 97,00`), `link` (URL completa, para modelo sem botão).
+
+**Rodapé:** `Para não receber mais mensagens, responda SAIR.`
+
+**Botão** — *Chamada para ação › Acessar o site*, tipo **Dinâmico**:
+
+| Campo | Valor |
+|---|---|
+| Texto do botão | `Finalizar compra` |
+| URL | `https://api.jornadaanjo.cloud/c/{{1}}` |
+| Amostra | `abc123` |
+
+O botão leva ao **nosso** endereço `/c/…`, que conta o clique e redireciona para o checkout do
+próprio carrinho (ou para o *Link do checkout (reserva)* do painel quando a Kirvano não manda o
+link). Por isso o modelo não depende do formato de link da Kirvano. Com um único botão, o
+**índice do botão de link** é `0`. Se acrescentar o botão de opt-out de marketing da Meta
+(“Parar promoções”) ANTES do link, o índice passa a ser `1`; tocar nele já descadastra o número.
+
+Para uma 2ª ou 3ª mensagem, crie outro modelo (ex.: `carrinho_lembrete_v1`) e preencha a
+Mensagem 2/3 no painel. Duas mensagens do mesmo carrinho nunca saem com menos de 60 minutos
+entre elas.

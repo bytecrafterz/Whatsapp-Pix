@@ -37,6 +37,7 @@ import json
 import logging
 import re
 import secrets
+from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -68,17 +69,25 @@ from app.panel_password import (
 from app.panel_queries import all_template_status, conversation_rows
 from app.phone import normalize_br
 from app.queries import (
+    cart_metrics,
+    cart_status_label,
     conversation_messages,
     dashboard_counts,
     job_state_label,
     order_status_label,
+    recent_carts,
     recent_events,
     recent_orders,
     worker_heartbeat_age,
 )
-from app.settings_store import SettingsStore, SettingValueError, get_settings_store
+from app.settings_store import (
+    CART_MAX_STEPS,
+    SettingsStore,
+    SettingValueError,
+    get_settings_store,
+)
 from app.templating import templates
-from app.whatsapp import TEMPLATE_PARAM_KEYS, GraphClient
+from app.whatsapp import CART_PARAM_KEYS, TEMPLATE_PARAM_KEYS, GraphClient
 
 log = logging.getLogger("app.panel")
 
@@ -223,6 +232,21 @@ REASON_LABELS: dict[str, str] = {
     "network_error": "falha de rede ao falar com a Meta",
     "unknown_error": "erro desconhecido",
     "job_cancelled": "lembrete cancelado",
+    # abandoned-cart sequence (app.cart)
+    "pix_generated": "cliente gerou o PIX",
+    "purchased": "cliente comprou",
+    "purchased_after": "cliente comprou depois do abandono",
+    "pix_flow_active": "PIX em andamento (lembrete do PIX cuida)",
+    "pix_reminder_sent": "já recebeu o lembrete do PIX",
+    "already_purchased": "já comprou este produto",
+    "cart_too_old": "carrinho antigo demais",
+    "cart_open": "carrinho em aberto",
+    "cart_pix_generated": "cliente gerou o PIX",
+    "cart_purchased": "cliente comprou",
+    "step_disabled": "mensagem desligada no painel",
+    "previous_not_sent": "a mensagem anterior não foi enviada",
+    "waiting_previous": "aguardando a mensagem anterior",
+    "sequence_exists": "sequência já iniciada",
 }
 
 
@@ -284,6 +308,8 @@ OK_MESSAGES: dict[str, str] = {
     "descadastro_removido": "Número removido dos descadastros.",
     "modelo": "Status do modelo atualizado com a Meta.",
     "senha": "Senha alterada. Use a nova senha no próximo acesso.",
+    "carrinho": "Configurações do carrinho salvas.",
+    "carrinho_modelos": "Status dos modelos de carrinho atualizado com a Meta.",
 }
 
 
@@ -303,6 +329,7 @@ templates.env.filters.setdefault("job_state_label", job_state_label)
 templates.env.filters.setdefault("order_status_label", order_status_label)
 templates.env.filters.setdefault("job_badge", job_badge)
 templates.env.filters.setdefault("order_badge", order_badge)
+templates.env.filters.setdefault("cart_status_label", cart_status_label)
 
 
 # --- rendering helpers ---------------------------------------------------------------
@@ -452,7 +479,8 @@ def validate_setting(key: str, value: str) -> str | None:
 
 def _config_context(store: SettingsStore, values: dict[str, str]) -> dict[str, Any]:
     return {
-        "definitions": list(SettingsStore.definitions()),
+        # The cart keys live on their own page (Carrinho).
+        "definitions": SettingsStore.group_definitions("pix"),
         "values": values,
         "ranges": PANEL_INT_RANGES,
         "store": store,
@@ -955,6 +983,239 @@ def atualizar_modelo(
         )
     session.commit()
     return _redirect("/painel/modelo", "modelo")
+
+
+# --- Carrinho (abandoned-cart recovery) ----------------------------------------------
+
+CART_PERIODS: dict[str, tuple[str, int | None]] = {
+    "7": ("últimos 7 dias", 7),
+    "30": ("últimos 30 dias", 30),
+    "tudo": ("desde o início", None),
+}
+COUPON_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+# Never two messages of one sequence closer than this (app.cart.MIN_STEP_GAP).
+MIN_STEP_GAP_MINUTES = 60
+
+
+async def submitted_form(request: Request) -> dict[str, str]:
+    """Async dependency: the urlencoded form as a plain dict (the Carrinho form has
+    one field per step, so naming each in the signature would be noise)."""
+    form = await request.form()
+    return {k: str(v) for k, v in form.items()}
+
+
+def _cart_keys() -> list[str]:
+    return [d.key for d in SettingsStore.group_definitions("cart")]
+
+
+def validate_cart_settings(values: dict[str, str]) -> dict[str, str]:
+    """pt-BR errors keyed by field (``__all__`` for cross-field problems); empty = valid."""
+    errors: dict[str, str] = {}
+
+    def as_int(key: str, low: int, high: int) -> int | None:
+        try:
+            number = int(values.get(key, "").strip())
+        except ValueError:
+            errors[key] = "Informe um número inteiro."
+            return None
+        if not low <= number <= high:
+            errors[key] = f"Use um número entre {low} e {high}."
+            return None
+        return number
+
+    steps = as_int("cart_steps", 1, CART_MAX_STEPS) or 1
+    if not values.get("cart_template_language", "").strip():
+        errors["cart_template_language"] = "Informe o idioma, por exemplo pt_BR."
+    fallback = values.get("cart_checkout_url", "").strip()
+    if fallback and not URL_RE.match(fallback):
+        errors["cart_checkout_url"] = "Use um link completo, começando com https://."
+    coupon = values.get("cart_coupon", "").strip()
+    if coupon and not COUPON_RE.match(coupon):
+        errors["cart_coupon"] = "Use só letras, números, - e _ (até 40), igual ao cupom na Kirvano."
+
+    uses_coupon = False
+    needs_link = False
+    previous_delay: int | None = None
+    for i in range(1, CART_MAX_STEPS + 1):
+        enabled = i <= steps
+        delay = as_int(f"cart_step{i}_delay_minutes", 5, 3 * 24 * 60)
+        name = values.get(f"cart_step{i}_template", "").strip()
+        if enabled and not name:
+            errors[f"cart_step{i}_template"] = "Informe o nome do modelo desta mensagem."
+        elif name and not TEMPLATE_NAME_RE.match(name):
+            errors[f"cart_step{i}_template"] = (
+                "Use apenas letras minúsculas, números e _ (igual ao nome na Meta)."
+            )
+        button = as_int(f"cart_step{i}_url_button_index", -1, 9)
+        keys = [k.strip() for k in values.get(f"cart_step{i}_params", "").split(",") if k.strip()]
+        unknown = [k for k in keys if k not in CART_PARAM_KEYS]
+        if unknown:
+            errors[f"cart_step{i}_params"] = (
+                f"Parâmetro desconhecido: {', '.join(unknown)}. "
+                f"Use apenas: {', '.join(sorted(CART_PARAM_KEYS))}."
+            )
+        if not enabled:
+            continue
+        uses_coupon = uses_coupon or "coupon" in keys
+        needs_link = needs_link or "link" in keys or (button is not None and button >= 0)
+        if delay is not None and previous_delay is not None:
+            if delay < previous_delay + MIN_STEP_GAP_MINUTES:
+                errors[f"cart_step{i}_delay_minutes"] = (
+                    f"Precisa ser pelo menos {MIN_STEP_GAP_MINUTES} minutos depois da "
+                    f"mensagem {i - 1}."
+                )
+        previous_delay = delay if delay is not None else previous_delay
+
+    if uses_coupon and not coupon:
+        errors["cart_coupon"] = "Um dos modelos usa o parâmetro coupon: informe o cupom."
+    enabled_flag = values.get("cart_enabled", "false") == "true"
+    if enabled_flag and needs_link and not fallback:
+        # The cart's own Kirvano link is used when the event carries one, but nothing
+        # guarantees it does — without a fallback the button could lead nowhere.
+        errors["cart_checkout_url"] = (
+            "Informe o link do checkout: é para onde o botão leva quando a Kirvano não "
+            "envia o link do carrinho."
+        )
+    return errors
+
+
+def _carrinho_page(
+    request: Request,
+    user: str,
+    session: Session,
+    store: SettingsStore,
+    client: GraphClient | None,
+    *,
+    values: dict[str, str] | None = None,
+    errors: dict[str, str] | None = None,
+    flash: str | None = None,
+    flash_kind: str = "ok",
+    status_code: int = 200,
+) -> Response:
+    now = clock.utcnow()
+    period_key = request.query_params.get("periodo", "30")
+    if period_key not in CART_PERIODS:
+        period_key = "30"
+    period_label, days = CART_PERIODS[period_key]
+    since = now - timedelta(days=days) if days else None
+    steps = store.cart_step_configs()
+    template_rows = {(row.name, row.language): row for row in all_template_status(session)}
+    heartbeat = worker_heartbeat_age(session, now=now)
+    return _render(
+        request,
+        "panel/carrinho.html",
+        user,
+        active="carrinho",
+        title="Carrinho abandonado",
+        status_code=status_code,
+        flash=flash,
+        flash_kind=flash_kind,
+        metrics=cart_metrics(session, since=since, now=now),
+        period_key=period_key,
+        period_label=period_label,
+        periods=CART_PERIODS,
+        steps=steps,
+        template_rows=template_rows,
+        badges=TEMPLATE_STATUS_BADGE,
+        carts=recent_carts(session, limit=50),
+        definitions=SettingsStore.group_definitions("cart"),
+        values=values if values is not None else {k: store.get(k) for k in _cart_keys()},
+        errors=errors or {},
+        store=store,
+        meta_configured=client is not None and client.configured,
+        worker_ok=heartbeat is not None and heartbeat < 60,
+        max_steps=CART_MAX_STEPS,
+        # The public domain (PUBLIC_BASE_URL / API_DOMAIN), whatever host the panel is
+        # being browsed from: this is what goes into the template in WhatsApp Manager.
+        button_url=f"{store.settings.base_url}/c/{{{{1}}}}",
+        now=now,
+    )
+
+
+@router.get("/carrinho", response_class=HTMLResponse)
+def carrinho(
+    request: Request,
+    user: str = Depends(require_panel_auth),
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+    client: GraphClient | None = Depends(get_graph_client),
+) -> Response:
+    return _carrinho_page(request, user, session, store, client)
+
+
+@router.post("/carrinho", response_class=HTMLResponse)
+def salvar_carrinho(
+    request: Request,
+    user: str = Depends(require_panel_auth),
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+    client: GraphClient | None = Depends(get_graph_client),
+    form: dict[str, str] = Depends(submitted_form),
+) -> Response:
+    error = check_mutation(request, user, form.get("nonce", ""))
+    if error:
+        return _error_page(request, user, error, status_code=403)
+    submitted = {k: form.get(k, "").strip() for k in _cart_keys()}
+    # An unchecked checkbox is simply absent from the form body.
+    submitted["cart_enabled"] = "true" if "cart_enabled" in form else "false"
+    errors = validate_cart_settings(submitted)
+    if not errors:
+        try:
+            store.set_many(submitted)
+        except SettingValueError as exc:
+            errors["__all__"] = str(exc)
+    if errors:
+        session.rollback()
+        return _carrinho_page(
+            request,
+            user,
+            session,
+            store,
+            client,
+            values=submitted,
+            errors=errors,
+            flash="Corrija os campos destacados: nada foi salvo.",
+            flash_kind="bad",
+            status_code=400,
+        )
+    session.commit()
+    log.info("panel: cart settings updated by %s", user)
+    return _redirect("/painel/carrinho", "carrinho")
+
+
+@router.post("/carrinho/modelos", response_class=HTMLResponse)
+def atualizar_modelos_carrinho(
+    request: Request,
+    user: str = Depends(require_panel_auth),
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+    client: GraphClient | None = Depends(get_graph_client),
+    nonce: str = Form(""),
+) -> Response:
+    error = check_mutation(request, user, nonce)
+    if error:
+        return _error_page(request, user, error, status_code=403)
+    names = sorted({s.template_name for s in store.cart_step_configs() if s.template_name})
+    problems = []
+    for name in names:
+        result = refresh_template_status(session, client, name, store.cart_template_language)
+        if not result.ok:
+            problems.append(result.message)
+    # Keep what DID refresh even when another template failed.
+    session.commit()
+    if problems:
+        return _carrinho_page(
+            request,
+            user,
+            session,
+            store,
+            client,
+            flash=" ".join(problems),
+            flash_kind="bad",
+            status_code=502,
+        )
+    return _redirect("/painel/carrinho", "carrinho_modelos")
 
 
 # --- mount hook ----------------------------------------------------------------------

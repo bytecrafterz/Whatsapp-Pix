@@ -56,6 +56,9 @@ STATUS_BY_EVENT: dict[str, str] = {
     "SALE_REFUSED": "REFUSED",
     "SALE_REFUNDED": "REFUNDED",
     "SALE_CHARGEBACK": "CHARGEBACK",
+    # Not captured from a real delivery yet: shape assumed from the other events
+    # (no sale_id, no payment). Replace with the real body once one arrives.
+    "ABANDONED_CART": "ABANDONED",
 }
 DESCRIPTION_BY_EVENT: dict[str, str] = {
     "PIX_GENERATED": "PIX gerado",
@@ -64,6 +67,7 @@ DESCRIPTION_BY_EVENT: dict[str, str] = {
     "SALE_REFUSED": "Compra recusada",
     "SALE_REFUNDED": "Reembolso",
     "SALE_CHARGEBACK": "Chargeback",
+    "ABANDONED_CART": "Carrinho abandonado",
 }
 EVENTS = tuple(STATUS_BY_EVENT)
 
@@ -236,6 +240,10 @@ def build_payload(
         body["checkout_url"] = checkout_url or f"https://pay.kirvano.com/recovery/{checkout_id}"
     elif checkout_url:
         body["checkout_url"] = checkout_url
+    if event == "ABANDONED_CART":
+        # Nothing was paid or even generated: no sale, no payment block.
+        for key in ("sale_id", "payment", "payment_method"):
+            body.pop(key, None)
     return body
 
 

@@ -57,7 +57,10 @@ def normalize_br(raw: str | None) -> PhoneForms | None:
         digits = "55" + digits
 
     if not digits.startswith("55") or len(digits) not in (12, 13):
-        if len(digits) < 8:
+        # E.164 caps a number at 15 digits. Anything longer is garbage, and keeping it
+        # used to break the whole event on PostgreSQL ("value too long for type
+        # character varying(20)" on orders.phone_e164) — SQLite never complained.
+        if len(digits) < 8 or len(digits) > 15:
             return None
         return PhoneForms(primary=digits, alternate=None, country="other", kind="unknown")
 

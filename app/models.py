@@ -13,6 +13,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -110,6 +111,12 @@ class OptOutSource(StrEnum):
     TEXT = "text"
     MANUAL = "manual"
     META_131050 = "meta_131050"
+
+
+class CartStatus(StrEnum):
+    OPEN = "open"  # abandoned; the message sequence may still be running
+    PIX_GENERATED = "pix_generated"  # came back and generated a PIX: the PIX flow takes over
+    PURCHASED = "purchased"  # bought (``recovered`` says whether a cart message came first)
 
 
 # --- tables ---------------------------------------------------------------------------
@@ -215,6 +222,98 @@ class RecoveryJob(Base):
     updated_at: Mapped[datetime]
 
     order: Mapped[Order] = relationship(back_populates="job")
+
+
+class Cart(Base):
+    """One abandoned checkout (Kirvano ``ABANDONED_CART``) and its recovery outcome.
+
+    New table rather than new columns on ``orders``: ``db.create_all`` adds missing
+    tables on startup but never alters existing ones, so this deploys without a
+    migration. A cart has no ``sale_id`` (Kirvano sends only ``checkout_id``); the sale
+    that later converts it is linked through ``converted_sale_id``.
+    """
+
+    __tablename__ = "carts"
+    __table_args__ = (
+        Index("ix_carts_checkout_id", "checkout_id"),
+        Index("ix_carts_phone_e164", "phone_e164"),
+        Index("ix_carts_phone_alt", "phone_alt"),
+        Index("ix_carts_status_abandoned", "status", "abandoned_at"),
+        Index("ix_carts_converted_sale_id", "converted_sale_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    flow: Mapped[str] = mapped_column(String(32), default="abandoned_cart")
+    checkout_id: Mapped[str | None] = mapped_column(String(64))
+    offer_id: Mapped[str | None] = mapped_column(String(64))
+    product_name: Mapped[str | None] = mapped_column(String(255))
+    customer_name: Mapped[str | None] = mapped_column(String(255))
+    customer_email: Mapped[str | None] = mapped_column(String(255))
+    phone_raw: Mapped[str | None] = mapped_column(String(32))
+    phone_e164: Mapped[str | None] = mapped_column(String(20))
+    phone_alt: Mapped[str | None] = mapped_column(String(20))
+    wa_id: Mapped[str | None] = mapped_column(String(20))
+    amount_cents: Mapped[int | None] = mapped_column(Integer)
+    # Kirvano's link back to this checkout, when the event carries one. The template
+    # button points at OUR /c/{link_token}, which redirects here (or to the panel's
+    # fallback link), so the approved template never depends on Kirvano's URL format.
+    checkout_url: Mapped[str | None] = mapped_column(Text)
+    link_token: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(16), default=CartStatus.OPEN.value)
+    # Why no sequence was started (no_phone, disabled, opted_out, ...); NULL when it was.
+    reason: Mapped[str | None] = mapped_column(String(64))
+    abandoned_at: Mapped[datetime]
+    converted_sale_id: Mapped[str | None] = mapped_column(String(64))
+    converted_at: Mapped[datetime | None]
+    converted_amount_cents: Mapped[int | None] = mapped_column(Integer)
+    # True only when the purchase came AFTER at least one cart message was sent:
+    # that is what the panel counts as "venda recuperada".
+    recovered: Mapped[bool] = mapped_column(Boolean, default=False)
+    clicks: Mapped[int] = mapped_column(Integer, default=0)
+    first_click_at: Mapped[datetime | None]
+    consent_ip: Mapped[str | None] = mapped_column(String(45))
+    consent_at: Mapped[datetime | None]
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
+
+    jobs: Mapped[list[CartJob]] = relationship(
+        back_populates="cart", order_by="CartJob.step", cascade="all, delete-orphan"
+    )
+
+    @property
+    def phone_variants(self) -> list[str]:
+        return [p for p in (self.phone_e164, self.phone_alt) if p]
+
+
+class CartJob(Base):
+    """One message of a cart's sequence. ``(cart_id, step)`` is unique: each step of a
+    cart is sent at most once, however many times Kirvano repeats the event."""
+
+    __tablename__ = "cart_jobs"
+    __table_args__ = (
+        UniqueConstraint("cart_id", "step", name="uq_cart_jobs_cart_step"),
+        Index("ix_cart_jobs_state_run_at", "state", "run_at"),
+        Index("ix_cart_jobs_wa_message_id", "wa_message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cart_id: Mapped[int] = mapped_column(ForeignKey("carts.id", ondelete="CASCADE"))
+    step: Mapped[int] = mapped_column(Integer)  # 1-based position in the sequence
+    run_at: Mapped[datetime]
+    state: Mapped[str] = mapped_column(String(16), default=JobState.SCHEDULED.value)
+    reason: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    claimed_at: Mapped[datetime | None]
+    sent_at: Mapped[datetime | None]
+    sent_to: Mapped[str | None] = mapped_column(String(20))
+    wa_message_id: Mapped[str | None] = mapped_column(String(128))
+    template_name: Mapped[str | None] = mapped_column(String(128))
+    error_code: Mapped[str | None] = mapped_column(String(32))
+    error_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
+
+    cart: Mapped[Cart] = relationship(back_populates="jobs")
 
 
 class Message(Base):

@@ -161,10 +161,12 @@ def test_late_pix_generated_never_downgrades_a_paid_order(session, settings, fro
 def test_unknown_and_ignored_events_are_stored(session, settings, frozen_clock):
     res = handle_event(session, kirvano_payload("SUBSCRIPTION_RENEWED"), settings=settings)
     assert res.outcome == "ignored"
+    # No longer ignored: ABANDONED_CART is the cart-recovery trigger (tests/test_cart.py).
+    # It creates a cart, never an order.
     res = handle_event(
         session, {"event": "ABANDONED_CART", "checkout_id": "Q8J1N6K3"}, settings=settings
     )
-    assert res.outcome == "ignored"
+    assert res.outcome == "processed" and res.cart_id is not None
     res = handle_event(session, {"event": "SOMETHING_NEW", "sale_id": "Z1"}, settings=settings)
     assert res.outcome == "unknown"
     assert session.execute(select(func.count()).select_from(WebhookEvent)).scalar_one() == 3

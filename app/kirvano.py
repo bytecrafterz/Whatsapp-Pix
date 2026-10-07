@@ -24,6 +24,7 @@ from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app import clock
+from app.cart import CONVERSION_EVENTS, EVENT_ABANDONED_CART, handle_abandoned_cart, on_sale_event
 from app.config import Settings, get_settings
 from app.models import (
     TERMINAL_PAID_STATUSES,
@@ -46,7 +47,8 @@ STATUS_EVENTS: dict[str, str] = {
     "SALE_REFUNDED": OrderStatus.REFUNDED.value,
     "SALE_CHARGEBACK": OrderStatus.CHARGEBACK.value,
 }
-IGNORED_EVENT_PREFIXES = ("BANK_SLIP_", "SUBSCRIPTION_", "ABANDONED_CART")
+# ABANDONED_CART is handled by app.cart (it used to be ignored here).
+IGNORED_EVENT_PREFIXES = ("BANK_SLIP_", "SUBSCRIPTION_")
 
 # Token transport is undocumented; accept any of these (spec).
 TOKEN_HEADERS = (
@@ -456,6 +458,7 @@ class EventResult:
     job_id: int | None = None
     reason: str | None = None
     webhook_event_id: int | None = None
+    cart_id: int | None = None
 
 
 def new_page_token() -> str:
@@ -702,6 +705,8 @@ def handle_event(
                 result.outcome, result.reason = "ignored", "no_sale_id"
             else:
                 _handle_pix_generated(session, payload, settings, store, now, result)
+        elif payload.event == EVENT_ABANDONED_CART:
+            handle_abandoned_cart(session, payload, store, now, result)
         elif payload.event in STATUS_EVENTS:
             if not payload.sale_id:
                 result.outcome, result.reason = "ignored", "no_sale_id"
@@ -712,6 +717,11 @@ def handle_event(
         else:
             result.outcome, result.reason = "unknown", "unknown_event"
             log.warning("unknown Kirvano event %r stored (id=%s)", payload.event, evt.id)
+        if payload.event in CONVERSION_EVENTS:
+            # Runs even when the order path ignored the event (a credit-card sale we
+            # never saw as a PIX): that sale still ends — and may recover — a cart.
+            # The order lock (if any) is already held, so cart locks come second.
+            on_sale_event(session, payload, now)
         evt.processed_at = now
         evt.outcome = result.outcome
         session.commit()

@@ -170,6 +170,7 @@ descartado na entrada e o modo `log` da Kirvano guarda apenas **nomes** de cabe�
 |---|---|
 | **Início** | pendentes agora, lembretes enviados hoje/7 dias, pagos depois do lembrete, cancelados por pagamento, expirados, falhas, últimos 50 pedidos |
 | **Configurações** | ligar/desligar, minutos de espera, horário silencioso, limite diário, nome/idioma do modelo, índice do botão, link do checkout |
+| **Carrinho** | recuperação de carrinho abandonado: ligar/desligar, cupom, 1 a 3 mensagens (horário, modelo, botão, parâmetros), resultados (enviadas, entregues, lidas, cliques, vendas e valor recuperados) e os últimos 50 carrinhos |
 | **Conversas** | respostas dos clientes; responder dentro da janela de 24 h |
 | **Descadastros** | quem pediu para sair; incluir/remover na mão |
 | **Eventos** | os últimos 100 webhooks recebidos, com o JSON cru |
@@ -189,6 +190,31 @@ worker, em segundos.
    **ordem dos parâmetros**.
 4. Pronto — o valor do banco tem prioridade sobre o `.env`, e vale já no próximo envio.
    Nenhum deploy, nenhum restart.
+
+### Recuperação de carrinho abandonado
+
+Vem **desligada**. Para ligar:
+
+1. Na Kirvano, edite o webhook "Recuperação PIX" e marque também o evento **Carrinho
+   abandonado** (mesma URL, mesmo token). Confira a primeira entrega em **Painel › Eventos**:
+   o corpo real desse evento ainda não tinha sido capturado quando o fluxo foi escrito, e o
+   parser foi feito tolerante (telefone, nome, produto, valor e link procurados nos mesmos
+   campos dos outros eventos).
+2. Crie o modelo de **Marketing** do `docs/TEMPLATE.md` §9 e espere a aprovação.
+3. **Painel › Carrinho**: cupom (precisa existir na Kirvano), modelo, link do checkout de
+   reserva → marque **Recuperação de carrinho ativada** → salvar → **Consultar status na
+   Meta**.
+4. Teste sem cliente real: `uv run python scripts/simulate_kirvano.py --event ABANDONED_CART
+   --phone 55DDDSEUNUMERO --url https://api.jornadaanjo.cloud/webhooks/kirvano` e veja o
+   carrinho aparecer em **Carrinho** com a mensagem agendada.
+
+Regras que o sistema aplica sozinho: cada mensagem de um carrinho sai no máximo uma vez
+(mesmo com o evento repetido pela Kirvano, e o mesmo telefone no mesmo dia continua a mesma
+sequência); gerar o PIX ou comprar cancela as mensagens que faltam na hora; quem está com PIX
+em andamento, recebeu o lembrete do PIX nas últimas 24 h, já comprou o produto nos últimos 30
+dias ou pediu para sair não recebe; horário silencioso e limite diário são os mesmos do PIX
+(o PIX tem prioridade). **Venda recuperada** = compra aprovada depois de pelo menos uma
+mensagem de carrinho; compra antes da mensagem conta à parte.
 
 ---
 

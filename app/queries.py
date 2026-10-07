@@ -10,14 +10,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 
 from sqlalchemy import case, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app import clock
 from app.format import SP_TZ
 from app.models import (
+    Cart,
+    CartJob,
+    CartStatus,
     Contact,
     JobState,
     Message,
+    MessageStatus,
     Order,
     OrderStatus,
     RecoveryJob,
@@ -224,6 +228,125 @@ def order_status_label(status: str | None) -> str:
         OrderStatus.REFUNDED.value: "reembolsado",
         OrderStatus.CHARGEBACK.value: "chargeback",
         OrderStatus.UNKNOWN.value: "desconhecido",
+    }.get(status or "", status or "")
+
+
+# --- abandoned carts ---------------------------------------------------------------------
+
+
+@dataclass
+class CartMetrics:
+    """The Carrinho page's numbers for one period (carts abandoned since ``since``)."""
+
+    abandoned: int  # carts Kirvano reported
+    reachable: int  # ... with a usable phone number
+    in_sequence: int  # ... for which a message sequence was started
+    sent: int  # cart messages Meta accepted
+    delivered: int  # ... that reached the phone (delivered or read)
+    read: int  # ... that were opened
+    clicked: int  # carts whose button was tapped at least once
+    recovered: int  # carts bought AFTER receiving a message
+    recovered_cents: int  # what those purchases were worth
+    purchased_without_message: int  # bought before any message (not counted as recovered)
+    scheduled: int  # messages waiting to go out right now
+    sent_carts: int  # carts that received at least one message
+
+    @property
+    def recovery_rate(self) -> float:
+        """Recovered carts over carts that got at least one message (0–100)."""
+        return 100.0 * self.recovered / self.sent_carts if self.sent_carts else 0.0
+
+
+def cart_metrics(
+    session: Session, *, since: datetime | None = None, now: datetime | None = None
+) -> CartMetrics:
+    """Counters for carts abandoned since ``since`` (all time when ``None``)."""
+    now = now or clock.utcnow()
+    carts = select(Cart.id)
+    if since is not None:
+        carts = carts.where(Cart.abandoned_at >= since)
+    cart_ids = carts.subquery()
+    in_period = Cart.id.in_(select(cart_ids.c.id))
+    job_in_period = CartJob.cart_id.in_(select(cart_ids.c.id))
+
+    sent_jobs = select(CartJob.id).where(job_in_period, CartJob.state == JobState.SENT.value)
+    delivered = (
+        select(CartJob.id)
+        .join(Message, Message.wa_message_id == CartJob.wa_message_id)
+        .where(
+            job_in_period,
+            CartJob.state == JobState.SENT.value,
+            Message.status.in_([MessageStatus.DELIVERED.value, MessageStatus.READ.value]),
+        )
+    )
+    read = (
+        select(CartJob.id)
+        .join(Message, Message.wa_message_id == CartJob.wa_message_id)
+        .where(
+            job_in_period,
+            CartJob.state == JobState.SENT.value,
+            Message.status == MessageStatus.READ.value,
+        )
+    )
+    recovered_cents = session.execute(
+        select(func.coalesce(func.sum(Cart.converted_amount_cents), 0)).where(
+            in_period, Cart.recovered.is_(True)
+        )
+    ).scalar_one()
+    sent_carts = (
+        select(CartJob.cart_id)
+        .where(job_in_period, CartJob.state == JobState.SENT.value)
+        .distinct()
+    )
+    return CartMetrics(
+        abandoned=_count(session, select(Cart.id).where(in_period)),
+        reachable=_count(session, select(Cart.id).where(in_period, Cart.phone_e164.is_not(None))),
+        in_sequence=_count(session, select(CartJob.cart_id).where(job_in_period).distinct()),
+        sent=_count(session, sent_jobs),
+        delivered=_count(session, delivered),
+        read=_count(session, read),
+        clicked=_count(session, select(Cart.id).where(in_period, Cart.clicks > 0)),
+        recovered=_count(session, select(Cart.id).where(in_period, Cart.recovered.is_(True))),
+        recovered_cents=int(recovered_cents or 0),
+        purchased_without_message=_count(
+            session,
+            select(Cart.id).where(
+                in_period,
+                Cart.status == CartStatus.PURCHASED.value,
+                Cart.recovered.is_(False),
+            ),
+        ),
+        scheduled=_count(
+            session,
+            select(CartJob.id).where(job_in_period, CartJob.state == JobState.SCHEDULED.value),
+        ),
+        sent_carts=_count(session, sent_carts),
+    )
+
+
+def recent_carts(session: Session, limit: int = 50) -> list[Cart]:
+    """Latest carts, newest first; ``cart.jobs`` is loaded in step order."""
+    return list(
+        session.execute(
+            select(Cart)
+            .options(selectinload(Cart.jobs))
+            .order_by(Cart.abandoned_at.desc(), Cart.id.desc())
+            .limit(limit)
+        ).scalars()
+    )
+
+
+def cart_by_link_token(session: Session, token: str) -> Cart | None:
+    if not token:
+        return None
+    return session.execute(select(Cart).where(Cart.link_token == token)).scalar_one_or_none()
+
+
+def cart_status_label(status: str | None) -> str:
+    return {
+        CartStatus.OPEN.value: "abandonado",
+        CartStatus.PIX_GENERATED.value: "gerou PIX",
+        CartStatus.PURCHASED.value: "comprou",
     }.get(status or "", status or "")
 
 

@@ -40,6 +40,73 @@ class SettingDef:
     help: str = ""  # pt-BR hint for the panel
     min: int | None = None
     max: int | None = None
+    # Which panel page edits it: "pix" → Configurações, "cart" → Carrinho.
+    group: str = "pix"
+
+
+# --- abandoned-cart sequence -----------------------------------------------------------
+
+CART_MAX_STEPS = 3
+CART_DEFAULT_DELAYS = (60, 24 * 60, 48 * 60)  # minutes after the abandonment
+CART_DEFAULT_TEMPLATE = "carrinho_abandonado_v1"
+CART_DEFAULT_PARAMS = "first_name,product,coupon"
+# A step later than this after the abandonment is never sent (scheduling.MAX_CART_AGE
+# allows a day of slack on top for quiet hours and retries).
+CART_MAX_DELAY_MINUTES = 3 * 24 * 60
+
+
+@dataclass(frozen=True)
+class CartStepConfig:
+    """Everything the worker needs to send step ``step`` of a cart sequence."""
+
+    step: int
+    delay_minutes: int
+    template_name: str
+    language: str
+    url_button_index: int  # -1 = the template has no URL button
+    params: tuple[str, ...]
+
+
+def _cart_step_defs(i: int) -> tuple[SettingDef, ...]:
+    return (
+        SettingDef(
+            f"cart_step{i}_delay_minutes",
+            "int",
+            lambda s, i=i: str(CART_DEFAULT_DELAYS[i - 1]),
+            f"Mensagem {i}: minutos após o abandono",
+            "Contados a partir do momento em que a Kirvano avisou o abandono.",
+            min=5,
+            max=CART_MAX_DELAY_MINUTES,
+            group="cart",
+        ),
+        SettingDef(
+            f"cart_step{i}_template",
+            "str",
+            lambda s, i=i: CART_DEFAULT_TEMPLATE if i == 1 else "",
+            f"Mensagem {i}: nome do modelo",
+            "Nome exato do modelo de Marketing aprovado no WhatsApp Manager.",
+            group="cart",
+        ),
+        SettingDef(
+            f"cart_step{i}_url_button_index",
+            "int",
+            lambda s: "0",
+            f"Mensagem {i}: índice do botão de link",
+            "Posição do botão de link no modelo (0 = primeiro). Use -1 se não houver botão.",
+            min=-1,
+            max=9,
+            group="cart",
+        ),
+        SettingDef(
+            f"cart_step{i}_params",
+            "str",
+            lambda s, i=i: CART_DEFAULT_PARAMS if i == 1 else "first_name,product",
+            f"Mensagem {i}: ordem dos parâmetros",
+            "Chaves separadas por vírgula: first_name, customer_name, product, amount, "
+            "amount_full, coupon, link. Deixe vazio se o modelo não tiver variáveis.",
+            group="cart",
+        ),
+    )
 
 
 SETTING_DEFS: tuple[SettingDef, ...] = (
@@ -120,6 +187,51 @@ SETTING_DEFS: tuple[SettingDef, ...] = (
         "Link do checkout",
         "Usado na página do PIX expirado quando a Kirvano não envia o link de recuperação.",
     ),
+    # --- abandoned cart (panel page "Carrinho") ---
+    SettingDef(
+        "cart_enabled",
+        "bool",
+        # Off until the client's Marketing template is approved and configured.
+        lambda s: "false",
+        "Recuperação de carrinho ativada",
+        "Quando desligada, nenhum carrinho abandonado recebe mensagem.",
+        group="cart",
+    ),
+    SettingDef(
+        "cart_steps",
+        "int",
+        lambda s: "1",
+        "Quantidade de mensagens",
+        "Quantas mensagens cada carrinho abandonado recebe, na ordem abaixo (1 a 3).",
+        min=1,
+        max=CART_MAX_STEPS,
+        group="cart",
+    ),
+    SettingDef(
+        "cart_coupon",
+        "str",
+        lambda s: "",
+        "Cupom",
+        "Código enviado no parâmetro coupon. Precisa estar criado e ativo na Kirvano.",
+        group="cart",
+    ),
+    SettingDef(
+        "cart_template_language",
+        "str",
+        lambda s: s.template_language,
+        "Idioma dos modelos",
+        "Código do idioma dos modelos de carrinho, por exemplo pt_BR.",
+        group="cart",
+    ),
+    SettingDef(
+        "cart_checkout_url",
+        "str",
+        lambda s: s.kirvano_checkout_url or "",
+        "Link do checkout (reserva)",
+        "Para onde o botão leva quando a Kirvano não envia o link do próprio carrinho.",
+        group="cart",
+    ),
+    *(d for i in range(1, CART_MAX_STEPS + 1) for d in _cart_step_defs(i)),
 )
 
 SETTING_KEYS: tuple[str, ...] = tuple(d.key for d in SETTING_DEFS)
@@ -172,8 +284,21 @@ def _normalise(defn: SettingDef, value: object) -> str:
             return value.strftime("%H:%M")
         return parse_time(str(value)).strftime("%H:%M")
     text = str(value if value is not None else "").strip()
-    if defn.key in ("template_name", "template_language") and not text:
+    if defn.key in ("template_name", "template_language", "cart_template_language") and not text:
         raise SettingValueError(f"{defn.label} não pode ficar vazio")
+    if defn.key.startswith("cart_step") and defn.key.endswith("_params"):
+        from app.whatsapp import CART_PARAM_KEYS  # local: whatsapp imports this module
+
+        keys = [p.strip() for p in text.split(",") if p.strip()]
+        # Empty IS allowed here: a cart template with no variables takes no body
+        # component at all (see whatsapp.build_cart_payload).
+        unknown = [k for k in keys if k not in CART_PARAM_KEYS]
+        if unknown:
+            raise SettingValueError(
+                f"{defn.label}: parâmetro desconhecido {', '.join(unknown)} "
+                f"(use: {', '.join(sorted(CART_PARAM_KEYS))})"
+            )
+        return ",".join(keys)
     if defn.key == "template_params":
         # Mirrors app.panel.validate_setting so the check also holds for callers that
         # do not go through the form. An unknown key silently became an EMPTY template
@@ -303,6 +428,50 @@ class SettingsStore:
     @property
     def checkout_url(self) -> str:
         return self.get("checkout_url")
+
+    # --- abandoned cart -------------------------------------------------------------
+
+    @property
+    def cart_enabled(self) -> bool:
+        return parse_bool(self.get("cart_enabled"))
+
+    @property
+    def cart_steps(self) -> int:
+        return max(1, min(CART_MAX_STEPS, int(self.get("cart_steps"))))
+
+    @property
+    def cart_coupon(self) -> str:
+        return self.get("cart_coupon")
+
+    @property
+    def cart_template_language(self) -> str:
+        return self.get("cart_template_language")
+
+    @property
+    def cart_checkout_url(self) -> str:
+        return self.get("cart_checkout_url")
+
+    def cart_step(self, step: int) -> CartStepConfig:
+        """Configuration of step ``step`` (1-based), whether or not it is enabled."""
+        if not 1 <= step <= CART_MAX_STEPS:
+            raise KeyError(step)
+        params = self.get(f"cart_step{step}_params")
+        return CartStepConfig(
+            step=step,
+            delay_minutes=int(self.get(f"cart_step{step}_delay_minutes")),
+            template_name=self.get(f"cart_step{step}_template").strip(),
+            language=self.cart_template_language,
+            url_button_index=int(self.get(f"cart_step{step}_url_button_index")),
+            params=tuple(p.strip() for p in params.split(",") if p.strip()),
+        )
+
+    def cart_step_configs(self) -> list[CartStepConfig]:
+        """The ENABLED steps, in order (``cart_steps`` of them)."""
+        return [self.cart_step(i) for i in range(1, self.cart_steps + 1)]
+
+    @classmethod
+    def group_definitions(cls, group: str) -> list[SettingDef]:
+        return [d for d in SETTING_DEFS if d.group == group]
 
 
 def get_settings_store(

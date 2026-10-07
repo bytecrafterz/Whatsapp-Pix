@@ -24,7 +24,8 @@ Kirvano checkout → customer generates PIX → webhook → after a configurable
   - `PIX_GENERATED` "PIX gerado" → status `PENDING` (this schedules the reminder)
   - `PIX_EXPIRED` "PIX expirado" → status `CANCELED`; carries `checkout_url` = https://pay.kirvano.com/recovery/<uuid> (link to generate a new PIX)
   - `SALE_APPROVED` "Compra aprovada" → status `APPROVED`; `payment.finished_at`
-  - `SALE_REFUSED`, `SALE_REFUNDED`, `SALE_CHARGEBACK`, `BANK_SLIP_GENERATED`, `BANK_SLIP_EXPIRED`, `ABANDONED_CART` (no sale_id, only checkout_id — ignore), `SUBSCRIPTION_*` (ignore)
+  - `SALE_REFUSED`, `SALE_REFUNDED`, `SALE_CHARGEBACK`, `BANK_SLIP_GENERATED`, `BANK_SLIP_EXPIRED`, `SUBSCRIPTION_*` (ignore)
+  - `ABANDONED_CART` (no sale_id, only checkout_id) — since 2026-10-07 the trigger of the abandoned-cart flow (`app/cart.py`, README §5 "Recuperação de carrinho abandonado"); `PIX_GENERATED` and `SALE_APPROVED` also close matching carts
   - Unknown events: store raw, log, 200.
 - **AUTHORITATIVE EXAMPLE: `tests/fixtures/kirvano_pix_generated.json`** — a REAL payload captured from the client's own webhook log on 2026-09-08 (sale `5LZEB2GJ`, fired 10/07/2026 17:05), PII replaced but every key/type/format byte-faithful. Parse against THIS, not the doc sample. Key facts it establishes, several of which contradict the official doc sample:
   1. **PIX validity on his checkout is 24 h**: `created_at "2026-07-10 17:05:30"` → `expires_at "2026-07-11 17:05:30"`. (The doc sample's 1 h is not his setting.) A 10-min reminder is therefore never near expiry, and `expires_too_soon` will rarely fire — but keep the clamp, the setting is merchant-editable.

@@ -23,10 +23,12 @@
   <p class="atualizado muted">Última atualização: {{ updated_at }}</p>
 
   <p>Esta política explica quais dados pessoais tratamos quando você compra o produto
-     <strong>Jornada com Meu Anjo</strong> e recebe, pelo WhatsApp, avisos sobre o pagamento
-     do seu próprio pedido. Ela vale para o checkout, para as mensagens enviadas pelo nosso
-     número de WhatsApp e para a página do PIX (o endereço que começa com
-     <code>/p/</code> e que você abre pelo botão da mensagem).</p>
+     <strong>Jornada com Meu Anjo</strong> — ou começa a compra e não conclui — e recebe, pelo
+     WhatsApp, mensagens sobre o pagamento do seu próprio pedido ou sobre a compra que você
+     deixou em aberto. Ela vale para o checkout, para as mensagens enviadas pelo nosso número de
+     WhatsApp, para a página do PIX (o endereço que começa com <code>/p/</code>) e para o link
+     que leva você de volta ao checkout (o endereço que começa com <code>/c/</code>), os dois
+     abertos pelo botão da mensagem.</p>
 
   <h2>1. Quem é o controlador dos dados</h2>
   <p><strong>CONNECT LT NEGOCIOS DIGITAIS LTDA</strong> — CNPJ 52.134.502/0001-09, com sede em
@@ -46,6 +48,9 @@
     <li><strong>Dados do pedido:</strong> código do pedido, produto e oferta, valor, forma de
         pagamento (PIX), situação do pagamento (gerado, pago, expirado, recusado, reembolsado),
         datas e horários, código PIX copia e cola e o prazo de validade dele.</li>
+    <li><strong>Dados da compra não concluída (carrinho abandonado):</strong> código do checkout,
+        produto, valor, data e hora em que a compra ficou em aberto, o link de volta ao checkout,
+        quantas vezes você tocou nesse link e se a compra foi concluída depois.</li>
     <li><strong>Registro do consentimento:</strong> o endereço de IP registrado pela plataforma
         de checkout no momento da compra e a data e hora correspondentes. Guardamos isso apenas
         como prova de qual aviso foi exibido a você e quando — nunca aparece em página pública.</li>
@@ -63,7 +68,8 @@
   <h2>3. De onde vêm esses dados</h2>
   <ul>
     <li>Do formulário de checkout que você preenche na Kirvano, repassado a nós pela própria
-        Kirvano quando um PIX é gerado ou quando o pagamento muda de situação.</li>
+        Kirvano quando um PIX é gerado, quando o pagamento muda de situação ou quando você
+        informa seus dados no checkout e não conclui a compra.</li>
     <li>Do WhatsApp, quando você responde a uma mensagem nossa ou toca em um dos botões.</li>
   </ul>
 
@@ -79,6 +85,15 @@
               pedido continua pendente, com o valor, o prazo e o link para pagar.</td>
           <td>Art. 7º, V — execução de contrato ou de procedimentos preliminares relacionados a
               contrato do qual você é parte.</td>
+        </tr>
+        <tr>
+          <td>Quando você informa seu celular no checkout e não conclui a compra, enviar pelo
+              WhatsApp no máximo 3 mensagens sobre essa compra (com o produto, o link para voltar
+              ao checkout e, quando houver, um cupom de desconto). As mensagens param assim que
+              você gera o PIX, compra ou pede para sair, e não são enviadas a quem já está com um
+              PIX em andamento ou acabou de receber o aviso de pagamento.</td>
+          <td>Art. 7º, I — consentimento, dado no checkout ao informar o celular; e art. 7º, IX —
+              legítimo interesse em ajudar você a concluir uma compra que você mesmo iniciou.</td>
         </tr>
         <tr>
           <td>Responder às suas mensagens sobre o pedido e prestar atendimento.</td>
@@ -107,13 +122,15 @@
   <h2>5. O que não fazemos</h2>
   <ul>
     <li>Não vendemos, alugamos nem cedemos seus dados para terceiros usarem em publicidade.</li>
-    <li>Não enviamos propaganda por WhatsApp com base neste cadastro: a mensagem trata do
-        pagamento do seu próprio pedido.</li>
-    <li>Não enviamos um segundo lembrete para o mesmo pedido.</li>
+    <li>Não enviamos propaganda geral por WhatsApp com base neste cadastro: as mensagens tratam
+        do pagamento do seu próprio pedido ou da compra que você começou e não concluiu.</li>
+    <li>Não enviamos um segundo lembrete de PIX para o mesmo pedido, nem mais de 3 mensagens
+        sobre a mesma compra não concluída.</li>
     <li>Não usamos cookies, pixels ou ferramentas de análise nas páginas deste domínio
-        (a página do PIX e esta política não carregam nada de fora).</li>
+        (a página do PIX, o link de volta ao checkout e esta política não carregam nada de
+        fora). O link de volta ao checkout apenas conta quantas vezes foi aberto.</li>
     <li>Não tomamos decisões automatizadas que afetem seus interesses além do envio ou não
-        envio do aviso de pagamento.</li>
+        envio das mensagens descritas nesta política.</li>
   </ul>
 
   <h2>6. Com quem compartilhamos</h2>
@@ -135,8 +152,9 @@
 
   <h2>7. Por quanto tempo guardamos</h2>
   <ul>
-    <li>Dados do pedido e das mensagens: <strong>12 meses</strong> contados do pedido. Depois
-        disso, são apagados ou anonimizados (ficam apenas números totais, sem identificar você).</li>
+    <li>Dados do pedido, da compra não concluída e das mensagens: <strong>12 meses</strong>
+        contados do pedido (ou do momento em que a compra ficou em aberto). Depois disso, são
+        apagados ou anonimizados (ficam apenas números totais, sem identificar você).</li>
     <li>Registro do consentimento (IP, data e hora do checkout): mesmo prazo de 12 meses.</li>
     <li>Lista de descadastro: mantida enquanto o sistema existir, porque é ela que garante que
         você não volte a receber mensagens. Guardamos nela o mínimo: o número e a data do pedido.</li>
@@ -147,11 +165,12 @@
   <h2>8. Como parar de receber as mensagens</h2>
   <ul>
     <li>Responda <strong>SAIR</strong> (ou “parar”, “cancelar”) na conversa do WhatsApp; ou</li>
-    <li>toque no botão <strong>“Não quero receber”</strong> da mensagem; ou</li>
+    <li>toque no botão <strong>“Não quero receber”</strong> (ou “Parar promoções”) da mensagem,
+        quando ela tiver um; ou</li>
     <li>escreva para <a href="mailto:{{ controller_email }}">{{ controller_email }}</a>.</li>
   </ul>
-  <p>O descadastro vale a partir do momento em que o registramos e cancela qualquer aviso ainda
-     não enviado. Você continua podendo nos escrever sobre o seu pedido, e isso não desfaz o
+  <p>O descadastro vale a partir do momento em que o registramos e cancela qualquer mensagem
+     ainda não enviada — aviso de pagamento ou mensagem de compra não concluída. Você continua podendo nos escrever sobre o seu pedido, e isso não desfaz o
      descadastro.</p>
 
   <h2>9. Seus direitos</h2>

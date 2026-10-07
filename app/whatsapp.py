@@ -21,8 +21,8 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.format import first_name, fmt_brl, fmt_dt_sp
-from app.models import Order
-from app.settings_store import SettingsStore
+from app.models import Cart, Order
+from app.settings_store import CartStepConfig, SettingsStore
 
 log = logging.getLogger(__name__)
 
@@ -180,6 +180,90 @@ def build_template_payload(
             "components": components,
         },
     }
+
+
+# --- abandoned-cart templates ------------------------------------------------------------
+
+# Keys a cart template may use. No sale_id/expiry: an abandoned cart has neither.
+# `coupon` is the panel's Cupom field, so the client can change the code without
+# re-approving the template; `link` is the full /c/ URL for a template with no button.
+CART_PARAM_KEYS = frozenset(
+    {"first_name", "customer_name", "product", "amount", "amount_full", "coupon", "link"}
+)
+COUPON_MAX_LEN = 40
+
+
+def cart_link_url(settings: Settings, link_token: str) -> str:
+    """Public redirect that sends the customer back to the checkout (pages.cart_redirect)."""
+    return f"{settings.base_url}/c/{link_token}"
+
+
+def build_cart_params(
+    cart: Cart,
+    step: CartStepConfig,
+    coupon: str,
+    *,
+    hard: bool = False,
+    settings: Settings | None = None,
+) -> list[str]:
+    """Body parameters for one cart step, in the order configured for that step."""
+    settings = settings or get_settings()
+    name_len = 30 if hard else NAME_MAX_LEN
+    values: dict[str, str] = {
+        "first_name": sanitize_param(first_name(cart.customer_name), name_len, ascii_only=hard)
+        or "cliente",
+        "customer_name": sanitize_param(cart.customer_name or "", name_len, ascii_only=hard)
+        or "cliente",
+        "product": sanitize_param(cart.product_name or "", PARAM_MAX_LEN, ascii_only=hard)
+        or "produto",
+        "amount": fmt_brl(cart.amount_cents),
+        "amount_full": fmt_brl(cart.amount_cents, symbol=True),
+        "coupon": sanitize_param(coupon, COUPON_MAX_LEN, ascii_only=hard),
+        "link": cart_link_url(settings, cart.link_token),
+    }
+    return fit_body_budget([values.get(key, "") for key in step.params])
+
+
+def build_cart_payload(
+    cart: Cart,
+    step: CartStepConfig,
+    coupon: str,
+    *,
+    to: str,
+    hard: bool = False,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    """``POST /messages`` body for one cart step; the URL button carries the link token."""
+    settings = settings or get_settings()
+    params = build_cart_params(cart, step, coupon, hard=hard, settings=settings)
+    components: list[dict[str, Any]] = []
+    if params:
+        components.append(
+            {"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}
+        )
+    if step.url_button_index >= 0:
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": str(step.url_button_index),
+                "parameters": [{"type": "text", "text": cart.link_token}],
+            }
+        )
+    return {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": step.template_name,
+            "language": {"code": step.language},
+            "components": components,
+        },
+    }
+
+
+def cart_template_preview(step: CartStepConfig, params: list[str]) -> str:
+    return f"[modelo {step.template_name}] " + " | ".join(params)
 
 
 def build_text_payload(to: str, body: str) -> dict[str, Any]:
@@ -424,6 +508,27 @@ class GraphClient:
         result = self._post_messages(body, target)
         # Look the body component up by type: it is absent for a template with no
         # variables, and then components[0] would be the URL button.
+        body_component = next(
+            (c for c in body["template"]["components"] if c.get("type") == "body"), None
+        )
+        result.params = [p["text"] for p in body_component["parameters"]] if body_component else []
+        return result
+
+    def send_cart_template(
+        self,
+        cart: Cart,
+        step: CartStepConfig,
+        coupon: str,
+        *,
+        to: str | None = None,
+        hard: bool = False,
+    ) -> SendResult:
+        """Send step ``step`` of a cart sequence to ``to`` (default: primary number)."""
+        target = to or cart.phone_e164 or cart.phone_alt
+        if not target:
+            return SendResult(ok=False, to="", error=GraphError(code=None, message="no phone"))
+        body = build_cart_payload(cart, step, coupon, to=target, hard=hard, settings=self.settings)
+        result = self._post_messages(body, target)
         body_component = next(
             (c for c in body["template"]["components"] if c.get("type") == "body"), None
         )

@@ -31,14 +31,15 @@ from urllib.parse import quote
 
 import qrcode
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app import clock
+from app.cart import register_click
 from app.db import get_session
 from app.deps import FRAME_DENY_HEADERS
-from app.models import Order, OrderStatus
-from app.queries import order_by_page_token
+from app.models import Cart, Order, OrderStatus
+from app.queries import cart_by_link_token, order_by_page_token
 from app.settings_store import SettingsStore, get_settings_store
 from app.templating import templates
 
@@ -47,7 +48,7 @@ log = logging.getLogger("app.pages")
 router = APIRouter()
 
 # Date shown on /privacidade ("última atualização").
-PRIVACY_UPDATED_AT = "08/09/2026"
+PRIVACY_UPDATED_AT = "07/10/2026"  # added the abandoned-cart messages
 
 # Public contacts: the controller's e-mail from the CNPJ record, and the merchant's
 # support address (it arrives in every Kirvano payload as `contactEmail`).
@@ -186,6 +187,47 @@ def pix_qr_png(page_token: str, session: Session = Depends(get_session)) -> Resp
     headers = dict(NO_STORE_HEADERS)
     headers["Content-Length"] = str(len(png))
     return Response(png, media_type="image/png", headers=headers)
+
+
+def cart_destination(cart: Cart, store: SettingsStore) -> str | None:
+    """Where the cart message's button leads: the cart's own checkout link, else the
+    panel's fallback for carts, else the PIX flow's generic checkout link."""
+    return (
+        safe_http_url(cart.checkout_url)
+        or safe_http_url(store.cart_checkout_url)
+        or safe_http_url(store.checkout_url)
+    )
+
+
+@router.get("/c/{link_token}")
+def cart_redirect(
+    link_token: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    store: SettingsStore = Depends(get_settings_store),
+) -> Response:
+    """The abandoned-cart message's button: count the tap, send them to the checkout.
+
+    Going through our domain instead of linking Kirvano directly keeps the approved
+    template independent of Kirvano's URL format (the button's base URL is fixed at
+    approval time) and is the only way to know a message was actually tapped.
+    """
+    cart = cart_by_link_token(session, link_token)
+    if cart is None:
+        return _not_found(request)
+    destination = cart_destination(cart, store)
+    if destination is None:
+        log.warning("cart %s: no checkout link to redirect to", cart.id)
+        return _not_found(request)
+    try:
+        register_click(session, cart, clock.utcnow())
+        session.commit()
+    except Exception:  # noqa: BLE001 - a lost click count must never block the customer
+        session.rollback()
+        log.exception("could not record click for cart %s", cart.id)
+    # 302 + no-store: the redirect must be re-evaluated (and counted) on every tap.
+    # no-referrer keeps the link token out of Kirvano's logs.
+    return RedirectResponse(destination, status_code=302, headers=NO_STORE_HEADERS)
 
 
 @router.get("/", response_class=HTMLResponse)
