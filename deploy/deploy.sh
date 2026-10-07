@@ -153,9 +153,16 @@ if [ "$RESTART" = "1" ] && systemctl cat pix-api.service >/dev/null 2>&1; then
     fi
   done
   # /health responde 200 mesmo "degraded" (worker sem batida ainda); mostramos o JSON.
+  # A API leva alguns segundos para abrir a porta depois do restart: tenta por ate 30 s
+  # antes de dizer SEM RESPOSTA (antes um unico teste aos 3 s dava alarme falso).
   echo -n "    /health: "
-  curl -fsS --max-time 10 http://127.0.0.1:8000/health || echo "SEM RESPOSTA"
-  echo
+  health=""
+  for _ in $(seq 1 15); do
+    health="$(curl -fsS --max-time 5 http://127.0.0.1:8000/health 2>/dev/null)" && break
+    health=""
+    sleep 2
+  done
+  echo "${health:-SEM RESPOSTA}"
 else
   echo "    servicos nao reiniciados"
 fi
