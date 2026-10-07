@@ -517,7 +517,7 @@ def test_each_product_goes_to_its_own_checkout(client, session, settings, cart_o
     )
     session.commit()
     for i, (product, offer) in enumerate(
-        [("Jornada com Meu Anjo", "offer-1"), ("Oração Diária", "offer-2"),
+        [("Jornada com Meu Anjo", "offer-1"), ("Oracao  diaria", "offer-2"),
          ("Terceiro", "offer-3"), ("Não listado", "offer-9")]
     ):  # fmt: skip
         body = cart_payload(checkout_id=f"CK{i}", phone=f"551199999000{i}", checkout_url=None)

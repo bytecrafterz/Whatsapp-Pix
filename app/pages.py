@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import io
 import logging
+import unicodedata
 from datetime import datetime
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -212,12 +213,20 @@ def with_tracking(url: str, coupon: str, utm: list[tuple[str, str]]) -> str:
     return urlunsplit(parts._replace(query=urlencode(kept + ours)))
 
 
+def _product_key(name: str | None) -> str:
+    """Product name for matching: no accents, no case, single spaces
+    ("Oração de Santo  Antônio" == "oracao de santo antonio")."""
+    decomposed = unicodedata.normalize("NFKD", name or "")
+    plain = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(plain.casefold().split())
+
+
 def product_checkout_link(cart: Cart, links: list[tuple[str, str]]) -> str | None:
-    """The panel's checkout link for the cart's product: same product name (any case),
-    else a link that contains the cart's Kirvano offer id."""
-    product = (cart.product_name or "").strip().casefold()
+    """The panel's checkout link for the cart's product: same product name (ignoring
+    case and accents), else a link that contains the cart's Kirvano offer id."""
+    product = _product_key(cart.product_name)
     for name, url in links:
-        if name and product and name.strip().casefold() == product:
+        if name and product and _product_key(name) == product:
             return safe_http_url(url)
     if cart.offer_id:
         for _, url in links:
