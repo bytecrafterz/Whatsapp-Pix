@@ -117,7 +117,8 @@
   <input type="hidden" name="nonce" value="{{ nonce }}">
   {% if errors.get('__all__') %}<p class="field-error">{{ errors['__all__'] }}</p>{% endif %}
 
-  {% for d in definitions if not d.key.startswith('cart_step') %}
+  {# cart_steps itself is a general field; only cart_step1_..., cart_step2_... go below. #}
+  {% for d in definitions if d.key == 'cart_steps' or not d.key.startswith('cart_step') %}
     {{ campo(d) }}
   {% endfor %}
 
