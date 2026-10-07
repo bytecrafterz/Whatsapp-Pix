@@ -251,6 +251,21 @@ def cart_destination(cart: Cart, store: SettingsStore) -> str | None:
     return with_tracking(base, store.cart_coupon.strip(), store.cart_link_utm)
 
 
+# WhatsApp Manager appends the {{1}} of a dynamic URL button by itself. Typing it into
+# the URL field as well (".../c/{{1}}") leaves a literal, percent-encoded "{{1}}" in the
+# approved template, so every tap arrives as "/c/%7B%7B1%7D%7D<token>". Strip it rather
+# than send those customers to a 404 until a corrected template is approved.
+LITERAL_PLACEHOLDER = "{{1}}"
+
+
+def button_value(raw: str) -> str:
+    """The token/sale code from a button URL, without stray literal ``{{1}}``."""
+    value = raw.strip()
+    while value.startswith(LITERAL_PLACEHOLDER):
+        value = value[len(LITERAL_PLACEHOLDER) :]
+    return value
+
+
 @router.get("/c/{link_token}")
 def cart_redirect(
     link_token: str,
@@ -264,7 +279,7 @@ def cart_redirect(
     template independent of Kirvano's URL format (the button's base URL is fixed at
     approval time) and is the only way to know a message was actually tapped.
     """
-    cart = cart_by_link_token(session, link_token)
+    cart = cart_by_link_token(session, button_value(link_token))
     if cart is None:
         return _not_found(request)
     destination = cart_destination(cart, store)
@@ -294,7 +309,7 @@ def access_redirect(
     One approved template serves every product: the button carries the sale code and
     the panel's per-product list decides where it leads.
     """
-    sale = post_sale_by_sale_id(session, sale_id)
+    sale = post_sale_by_sale_id(session, button_value(sale_id))
     if sale is None:
         return _not_found(request)
     destination = product_checkout_link(sale, store.post_access_links) or safe_http_url(

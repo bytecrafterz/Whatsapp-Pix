@@ -468,7 +468,9 @@ def test_button_redirects_to_the_checkout_and_counts_the_click(
     assert r.status_code == 302 and r.headers["location"] == f"{CHECKOUT_LINK}?{TRACKING}"
     assert r.headers["cache-control"] == "no-store"
     assert r.headers["referrer-policy"] == "no-referrer"
-    client.get(f"/c/{cart.link_token}", follow_redirects=False)
+    # Template approved with "{{1}}" typed into the URL field: Meta sends it literally.
+    r = client.get(f"/c/%7B%7B1%7D%7D{cart.link_token}", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == f"{CHECKOUT_LINK}?{TRACKING}"
     session.refresh(cart)
     assert cart.clicks == 2 and cart.first_click_at is not None
     assert cart_metrics(session).clicked == 1

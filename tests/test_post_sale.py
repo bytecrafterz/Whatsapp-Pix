@@ -385,6 +385,8 @@ def test_access_button_leads_to_the_members_area_of_the_product_bought(
     assert location("CARD0001") == "https://membros.example.com/jornada"
     assert location("CARD0002") == "https://membros.example.com/santo-antonio"
     assert location("CARD0003") == "https://membros.example.com/geral"  # not listed
+    # "{{1}}" typed into the template's URL field arrives literally in front of the code.
+    assert location("%7B%7B1%7D%7DCARD0001") == "https://membros.example.com/jornada"
     assert client.get("/a/NOPE0000", follow_redirects=False).status_code == 404
 
 

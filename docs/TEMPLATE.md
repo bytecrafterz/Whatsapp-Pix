@@ -146,8 +146,12 @@ Ordem configurada por padrão: `first_name,product,coupon`. Outras chaves aceita
 | Campo | Valor |
 |---|---|
 | Texto do botão | `Finalizar compra` |
-| URL | `https://api.jornadaanjo.cloud/c/{{1}}` |
-| Amostra | `abc123` |
+| URL do site | digite só `https://api.jornadaanjo.cloud/c/` — o WhatsApp Manager acrescenta o `{{1}}` sozinho |
+| URL da amostra | `https://api.jornadaanjo.cloud/c/abc123` |
+
+**Não digite `{{1}}` no campo da URL**: ele vira texto (`%7B%7B1%7D%7D`) e o contador passa
+de 32 para 45 caracteres. O sistema tolera esse erro (ignora um `{{1}}` literal no início do
+código), mas a Meta pode recusar o modelo porque a amostra não bate com a URL.
 
 O botão leva ao **nosso** endereço `/c/…`, que conta o clique e redireciona para o checkout do
 próprio carrinho (ou para o *Link do checkout (reserva)* do painel quando a Kirvano não manda o
@@ -202,8 +206,8 @@ modelo sem botão).
 | Campo | Valor |
 |---|---|
 | Texto do botão | `Acessar meu produto` |
-| URL | `https://api.jornadaanjo.cloud/a/{{1}}` |
-| Amostra | `ABC12345` |
+| URL do site | digite só `https://api.jornadaanjo.cloud/a/` — o `{{1}}` é acrescentado sozinho |
+| URL da amostra | `https://api.jornadaanjo.cloud/a/ABC12345` |
 
 O botão leva ao **nosso** endereço `/a/…` com o código da venda, que redireciona para a área
 de membros (ou o tutorial de acesso) **do produto que o cliente comprou**, conforme a lista
