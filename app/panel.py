@@ -91,6 +91,7 @@ from app.settings_store import (
     SettingValueError,
     get_settings_store,
     parse_link_utm,
+    parse_product_links,
 )
 from app.templating import templates
 from app.whatsapp import CART_PARAM_KEYS, POST_PARAM_KEYS, TEMPLATE_PARAM_KEYS, GraphClient
@@ -1051,6 +1052,11 @@ def validate_cart_settings(values: dict[str, str]) -> dict[str, str]:
         parse_link_utm(values.get("cart_link_utm", ""))
     except SettingValueError as exc:
         errors["cart_link_utm"] = str(exc)
+    product_links: list[tuple[str, str]] = []
+    try:
+        product_links = parse_product_links(values.get("cart_product_links", ""))
+    except SettingValueError as exc:
+        errors["cart_product_links"] = str(exc)
 
     uses_coupon = False
     needs_link = False
@@ -1088,7 +1094,7 @@ def validate_cart_settings(values: dict[str, str]) -> dict[str, str]:
     if uses_coupon and not coupon:
         errors["cart_coupon"] = "Um dos modelos usa o parâmetro coupon: informe o cupom."
     enabled_flag = values.get("cart_enabled", "false") == "true"
-    if enabled_flag and needs_link and not fallback:
+    if enabled_flag and needs_link and not fallback and not product_links:
         # The cart's own Kirvano link is used when the event carries one, but nothing
         # guarantees it does — without a fallback the button could lead nowhere.
         errors["cart_checkout_url"] = (

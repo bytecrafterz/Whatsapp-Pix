@@ -20,6 +20,10 @@
              {% if d.min is not none %}min="{{ d.min }}"{% endif %}
              {% if d.max is not none %}max="{{ d.max }}"{% endif %}
              step="1" required class="{% if erro %}invalid{% endif %}">
+    {% elif d.kind == 'text' %}
+      <textarea id="{{ d.key }}" name="{{ d.key }}" rows="3" spellcheck="false"
+                placeholder="A Jornada com meu Anjo | https://pay.kirvano.com/..."
+                class="{% if erro %}invalid{% endif %}">{{ valor }}</textarea>
     {% else %}
       <input type="text" id="{{ d.key }}" name="{{ d.key }}" value="{{ valor }}"
              class="{% if erro %}invalid{% endif %}">

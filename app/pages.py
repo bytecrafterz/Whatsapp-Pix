@@ -212,12 +212,28 @@ def with_tracking(url: str, coupon: str, utm: list[tuple[str, str]]) -> str:
     return urlunsplit(parts._replace(query=urlencode(kept + ours)))
 
 
+def product_checkout_link(cart: Cart, links: list[tuple[str, str]]) -> str | None:
+    """The panel's checkout link for the cart's product: same product name (any case),
+    else a link that contains the cart's Kirvano offer id."""
+    product = (cart.product_name or "").strip().casefold()
+    for name, url in links:
+        if name and product and name.strip().casefold() == product:
+            return safe_http_url(url)
+    if cart.offer_id:
+        for _, url in links:
+            if cart.offer_id in url:
+                return safe_http_url(url)
+    return None
+
+
 def cart_destination(cart: Cart, store: SettingsStore) -> str | None:
-    """Where the cart message's button leads: the cart's own checkout link, else the
-    panel's fallback for carts, else the PIX flow's generic checkout link — with the
-    coupon already applied and the WhatsApp-recovery UTMs."""
+    """Where the cart message's button leads, with the coupon already applied and the
+    WhatsApp-recovery UTMs: the cart's own checkout link, else the panel's link for
+    the cart's product, else the panel's fallback for carts, else the PIX flow's
+    generic checkout link."""
     base = (
         safe_http_url(cart.checkout_url)
+        or product_checkout_link(cart, store.cart_product_links)
         or safe_http_url(store.cart_checkout_url)
         or safe_http_url(store.checkout_url)
     )

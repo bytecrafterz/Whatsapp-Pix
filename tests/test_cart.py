@@ -503,6 +503,38 @@ def test_button_link_replaces_the_ad_utms_and_keeps_other_parameters(
     assert r.headers["location"] == link
 
 
+def test_each_product_goes_to_its_own_checkout(client, session, settings, cart_on, frozen_clock):
+    """Two products, one coupon: the button follows the product of the abandoned cart."""
+    cart_on.set_many(
+        {
+            "cart_checkout_url": "https://pay.kirvano.com/reserva",
+            "cart_product_links": (
+                "jornada com meu anjo | https://pay.kirvano.com/produto-1\n"
+                "Oração Diária | https://pay.kirvano.com/produto-2\n"
+                "https://pay.kirvano.com/offer-3"
+            ),
+        }
+    )
+    session.commit()
+    for i, (product, offer) in enumerate(
+        [("Jornada com Meu Anjo", "offer-1"), ("Oração Diária", "offer-2"),
+         ("Terceiro", "offer-3"), ("Não listado", "offer-9")]
+    ):  # fmt: skip
+        body = cart_payload(checkout_id=f"CK{i}", phone=f"551199999000{i}", checkout_url=None)
+        body["products"][0].update(name=product, offer_id=offer)
+        handle_event(session, body, settings=settings)
+    links = [
+        client.get(f"/c/{cart.link_token}", follow_redirects=False).headers["location"]
+        for cart in _carts(session)
+    ]
+    assert links == [
+        f"https://pay.kirvano.com/produto-1?{TRACKING}",  # by name, any case
+        f"https://pay.kirvano.com/produto-2?{TRACKING}",
+        f"https://pay.kirvano.com/offer-3?{TRACKING}",  # by the offer id inside the link
+        f"https://pay.kirvano.com/reserva?{TRACKING}",  # not listed: the fallback
+    ]
+
+
 # --- panel --------------------------------------------------------------------------------
 
 
@@ -581,6 +613,8 @@ def test_carrinho_settings_are_saved(client, session, store):
         ({"cart_coupon": "VOLTA 10!"}, "Use só letras"),
         ({"cart_link_utm": "utm_source"}, "Rastreamento inválido"),
         ({"cart_link_utm": "utm_source=whatsapp&coupon=X"}, "Não coloque coupon"),
+        ({"cart_product_links": "Produto sem link"}, "Linha inválida"),
+        ({"cart_product_links": "Produto | javascript:alert(1)"}, "Linha inválida"),
     ],
 )
 def test_carrinho_settings_are_validated(client, session, store, overrides, message):
@@ -591,6 +625,24 @@ def test_carrinho_settings_are_validated(client, session, store, overrides, mess
     assert message in r.text
     store.refresh()
     assert store.cart_enabled is False  # nothing saved
+
+
+def test_product_links_can_replace_the_fallback_link(client, session, store):
+    # A browser sends textarea lines with CRLF; blank lines are dropped.
+    links = "Produto A | https://pay.kirvano.com/a\r\n\r\nProduto B|https://pay.kirvano.com/b"
+    r = client.post(
+        "/painel/carrinho",
+        auth=AUTH,
+        data=_form(_nonce(client), cart_checkout_url="", cart_product_links=links),
+        headers=ORIGIN,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    store.refresh()
+    assert store.get("cart_product_links") == (
+        "Produto A | https://pay.kirvano.com/a\nProduto B | https://pay.kirvano.com/b"
+    )
+    assert "<textarea" in client.get("/painel/carrinho", auth=AUTH).text
 
 
 def test_carrinho_form_needs_the_nonce(client, session, store):

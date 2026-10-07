@@ -213,6 +213,13 @@ O botão abre o checkout com o cupom já aplicado (`?coupon=CUPOM`) e com as UTM
 **Rastreamento do link** (padrão `utm_source=whatsapp&utm_medium=recuperacao&utm_campaign=carrinho_abandonado`),
 então na Kirvano a venda aparece como vinda da recuperação pelo WhatsApp.
 
+Mais de um produto: em **Links do checkout por produto**, uma linha por produto no formato
+`nome do produto | link do checkout` (o nome como aparece na lista de carrinhos; maiúsculas
+não importam). Uma linha só com o link também vale quando o link contém o código da oferta
+da Kirvano. Produto que não estiver na lista vai para o **Link do checkout (reserva)**. O
+segundo produto também precisa estar no webhook da Kirvano (campo *Produto*), senão os
+eventos dele nem chegam.
+
 Regras que o sistema aplica sozinho: cada mensagem de um carrinho sai no máximo uma vez
 (mesmo com o evento repetido pela Kirvano, e o mesmo telefone no mesmo dia continua a mesma
 sequência); gerar o PIX ou comprar cancela as mensagens que faltam na hora; quem está com PIX

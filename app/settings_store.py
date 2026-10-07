@@ -28,7 +28,7 @@ from app.config import Settings, get_settings
 from app.db import get_session
 from app.models import Setting
 
-SettingKind = Literal["bool", "int", "time", "str"]
+SettingKind = Literal["bool", "int", "time", "str", "text"]  # text = several lines
 
 
 @dataclass(frozen=True)
@@ -285,6 +285,16 @@ SETTING_DEFS: tuple[SettingDef, ...] = (
         group="cart",
     ),
     SettingDef(
+        "cart_product_links",
+        "text",
+        lambda s: "",
+        "Links do checkout por produto",
+        "Um produto por linha: nome do produto | link do checkout. O botão leva cada "
+        "carrinho ao checkout do produto dele (use o nome como aparece na lista de "
+        "carrinhos abaixo). Produto que não estiver aqui vai para o link de reserva.",
+        group="cart",
+    ),
+    SettingDef(
         "cart_link_utm",
         "str",
         lambda s: CART_DEFAULT_LINK_UTM,
@@ -335,6 +345,28 @@ _FALSE = {"0", "false", "no", "off", "nao", "não", "n", "f", ""}
 
 class SettingValueError(ValueError):
     """Raised by :meth:`SettingsStore.set` on an invalid value (message is pt-BR)."""
+
+
+def parse_product_links(raw: str) -> list[tuple[str, str]]:
+    """``nome do produto | https://...`` lines as ``(name, url)`` pairs.
+
+    A line with only a link is allowed (name ``""``): it then matches a cart whose
+    Kirvano offer id appears in the link. Raises :class:`SettingValueError` on a line
+    without an http(s) link, so the panel refuses it.
+    """
+    links: list[tuple[str, str]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        name, _, url = line.partition("|") if "|" in line else ("", "", line)
+        name, url = name.strip(), url.strip()
+        if not url.lower().startswith(("http://", "https://")) or " " in url:
+            raise SettingValueError(
+                f"Linha inválida: {line!r}. Use: nome do produto | https://pay.kirvano.com/..."
+            )
+        links.append((name, url))
+    return links
 
 
 def parse_link_utm(raw: str) -> list[tuple[str, str]]:
@@ -432,6 +464,8 @@ def _normalise(defn: SettingDef, value: object) -> str:
         return ",".join(keys)
     if defn.key == "cart_link_utm":
         return urlencode(parse_link_utm(text))
+    if defn.key == "cart_product_links":
+        return "\n".join(f"{n} | {u}" if n else u for n, u in parse_product_links(text))
     if defn.key == "template_params":
         # Mirrors app.panel.validate_setting so the check also holds for callers that
         # do not go through the form. An unknown key silently became an EMPTY template
@@ -583,6 +617,13 @@ class SettingsStore:
     @property
     def cart_checkout_url(self) -> str:
         return self.get("cart_checkout_url")
+
+    @property
+    def cart_product_links(self) -> list[tuple[str, str]]:
+        try:
+            return parse_product_links(self.get("cart_product_links"))
+        except SettingValueError:  # a bad DB value must never break the redirect
+            return []
 
     @property
     def cart_link_utm(self) -> list[tuple[str, str]]:
