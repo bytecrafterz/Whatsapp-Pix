@@ -349,10 +349,11 @@ def main(argv: list[str] | None = None, settings: Settings | None = None) -> int
 
     print(f"POST {args.url}")
     print(f"  evento ..... {payload['event']} ({payload['status']})")
-    print(f"  pedido ..... {payload['sale_id']}")
+    # An ABANDONED_CART has no sale and no payment block: only the checkout code.
+    print(f"  pedido ..... {payload.get('sale_id') or '-'} (checkout {payload['checkout_id']})")
     print(f"  valor ...... {payload['total_price']}")
     print(f"  telefone ... {payload['customer']['phone_number']}")
-    print(f"  expira em .. {payload['payment'].get('expires_at', '-')}")
+    print(f"  expira em .. {payload.get('payment', {}).get('expires_at', '-')}")
     print(
         f"  token ...... {'sim' if token and args.token_in != 'none' else 'nao'} ({args.token_in})"
     )

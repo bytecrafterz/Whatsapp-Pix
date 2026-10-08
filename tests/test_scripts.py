@@ -455,3 +455,30 @@ def test_simulate_post_still_sends_the_real_token() -> None:
     """Masking is a --print concern only: the POST path must keep the real value."""
     body = simulate_kirvano.with_body_token({"event": "X"}, "real-token", token_in="body")
     assert body["token"] == "real-token"
+
+
+@respx.mock
+@pytest.mark.parametrize("event", ["ABANDONED_CART", "SALE_APPROVED", "PIX_EXPIRED"])
+def test_simulate_main_posts_every_event(
+    event: str, capsys: pytest.CaptureFixture[str], settings: Settings
+) -> None:
+    """The summary printed before the POST used to crash on ABANDONED_CART (no sale_id,
+    no payment block), so the cart test never reached the server."""
+    route = respx.post("https://api.test.local/webhooks/kirvano").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    rc = simulate_kirvano.main(
+        [
+            "--event",
+            event,
+            "--phone",
+            "+554398150536",
+            "--url",
+            "https://api.test.local/webhooks/kirvano",
+        ],
+        settings=settings,
+    )
+    assert rc == 0 and route.call_count == 1
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["event"] == event and sent["customer"]["phone_number"] == "+554398150536"
+    assert "HTTP 200" in capsys.readouterr().out
