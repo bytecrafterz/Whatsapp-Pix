@@ -48,6 +48,14 @@ def normalize_br(raw: str | None) -> PhoneForms | None:
     if not digits:
         return None
 
+    if (raw or "").strip().startswith("+") and not digits.startswith("55"):
+        # "+1 (447) 330-1229" is already a full international number. Without this, its
+        # 11 digits pass for a Brazilian number without the 55 (DDD 14) and the message
+        # would go to a stranger in Bauru.
+        if len(digits) < 8 or len(digits) > 15:
+            return None
+        return PhoneForms(primary=digits, alternate=None, country="other", kind="unknown")
+
     if digits.startswith("00") and len(digits) > 12:
         digits = digits[2:]  # "0055..." international dialling prefix
     elif digits.startswith("0") and len(digits) in (11, 12):

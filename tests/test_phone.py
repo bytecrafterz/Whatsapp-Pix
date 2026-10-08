@@ -40,6 +40,16 @@ def test_normalize_non_br_and_garbage():
     assert normalize_br("abc") is None
 
 
+def test_plus_means_the_number_is_already_international():
+    # 11 digits like a BR number without 55 (DDD 14): the "+" says it is a US number.
+    us = normalize_br("+1 (447) 330-1229")
+    assert us is not None and us.primary == "14473301229" and us.country == "other"
+    # Without the "+" it is still read as Brazilian, as Kirvano's own format requires.
+    assert normalize_br("14473301229").primary == "5514473301229"
+    # "+55" keeps the Brazilian rules, including the 12-digit alternate.
+    assert normalize_br("+5511987654321").alternate == "551187654321"
+
+
 def test_variants_and_same_number():
     assert variants("5511987654321") == ["5511987654321", "551187654321"]
     assert variants("551133334444") == ["551133334444"]
