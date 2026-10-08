@@ -302,6 +302,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sale-id", default=None, help="reaproveita o mesmo pedido entre eventos")
     p.add_argument("--checkout-id", default=None)
     p.add_argument("--name", default="Maria Souza de Oliveira")
+    p.add_argument(
+        "--email",
+        default="maria.souza.exemplo@gmail.com",
+        help="e-mail do cliente (use um diferente por teste: venda e carrinho se casam por e-mail)",
+    )
     p.add_argument("--phone", default="5551994697674", help="55 + DDD + numero, so digitos")
     p.add_argument("--amount", type=float, default=97.0)
     p.add_argument(
@@ -329,6 +334,7 @@ def main(argv: list[str] | None = None, settings: Settings | None = None) -> int
         sale_id=args.sale_id,
         checkout_id=args.checkout_id,
         customer_name=args.name,
+        customer_email=args.email,
         phone=args.phone,
         amount=args.amount,
         expiry_hours=args.expiry_hours,
