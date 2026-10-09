@@ -276,6 +276,69 @@ def test_a_card_purchase_reported_before_the_cart_event_blocks_the_message(
     assert _jobs(session) == []
 
 
+REAL_OFFER_URL = "https://pay.kirvano.com/c15420ed-ffb0-4b4d-a7cf-904ca0000000"
+
+
+def real_cart_body(name: str, phone: str, email: str, created: datetime) -> dict[str, Any]:
+    """The shape of a REAL ABANDONED_CART (Painel > Eventos, 2026-10-09), personal data
+    replaced. Note "checkout_id": "null" - the word, not a JSON null - on every cart."""
+    return {
+        "checkout_id": "null",
+        "checkout_url": REAL_OFFER_URL,
+        "contactEmail": "contato@example.com",
+        "created_at": sp_str(created),
+        "customer": {
+            "address": {"city": None, "complement": None, "neighborhood": None,
+                        "number": None, "state": None, "street": None, "zipcode": None},
+            "email": email,
+            "name": name,
+            "phone_number": phone,
+        },
+        "event": "ABANDONED_CART",
+        "event_description": "Carrinho abandonado",
+        "ip": "186.194.24.133",
+        "products": [
+            {
+                "category": "91321cff-087a-4353-96c3-01af1c7f171",
+                "description": "",
+                "format": "community",
+                "id": "c763cbbe-ec7e-46c8-9964-1c6ab3f3f600",
+                "is_order_bump": False,
+                "name": "Oração de Santo Antônio",
+                "offer_id": "c15420ed-ffb0-4b4d-a7cf-904ca0000000",
+                "offer_name": "Padrao",
+                "photo": "products/c763cbbe/cover-1.jpg",
+                "price": "R$ 99,90",
+            }
+        ],
+        "status": "ABANDONED_CART",
+        "total_price": "R$ 99,90",
+        "type": "ONE_TIME",
+        "utm": {"src": "santoantoniolead1", "utm_source": "FB", "utm_medium": "Aberto|1"},
+    }  # fmt: skip
+
+
+def test_real_kirvano_carts_with_checkout_id_null(client, session, settings, cart_on, frozen_clock):
+    results = [
+        handle_event(session, real_cart_body(name, phone, email, DEFAULT_NOW), settings=settings)
+        for name, phone, email in [
+            ("Gildete Bonfim", "5574999746627", "g@example.com"),
+            ("Ana Souza", "5521988887777", "ana@example.com"),
+        ]
+    ]
+    assert [(r.outcome, r.reason) for r in results] == [
+        ("processed", "scheduled_1"),
+        ("processed", "scheduled_1"),
+    ]
+    first, second = _carts(session)
+    assert first.checkout_id is None  # "null" is no code at all
+    assert (first.product_name, first.amount_cents) == ("Oração de Santo Antônio", 9990)
+    assert first.checkout_url == REAL_OFFER_URL and first.phone_e164 == "5574999746627"
+    # The button returns each customer to the offer they abandoned, coupon applied.
+    r = client.get(f"/c/{second.link_token}", follow_redirects=False)
+    assert r.headers["location"] == f"{REAL_OFFER_URL}?{TRACKING}"
+
+
 # --- stopping it -------------------------------------------------------------------------
 
 

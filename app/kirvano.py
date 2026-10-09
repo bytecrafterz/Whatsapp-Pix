@@ -276,6 +276,16 @@ def _str(value: object) -> str | None:
     return s or None
 
 
+# Kirvano writes a missing id as the TEXT "null" (seen on every real ABANDONED_CART:
+# "checkout_id": "null"). Taken as a real code, it made all carts share one.
+_NO_ID = {"null", "none", "undefined", "nil"}
+
+
+def _id(value: object) -> str | None:
+    s = _str(value)
+    return None if s is None or s.lower() in _NO_ID else s
+
+
 def _clip(value: str | None, max_len: int) -> str | None:
     """Trim a payload string to the width of the column that will hold it."""
     if value is None:
@@ -359,8 +369,8 @@ def parse_payload(raw: Mapping, tz_name: str = "America/Sao_Paulo") -> KirvanoPa
     return KirvanoPayload(
         event=((_str(raw.get("event")) or "UNKNOWN").upper())[:MAX_ID_LEN],
         event_description=_str(raw.get("event_description")),
-        checkout_id=_clip(_str(raw.get("checkout_id")), MAX_ID_LEN),
-        sale_id=_clip(_str(raw.get("sale_id")), MAX_ID_LEN),
+        checkout_id=_clip(_id(raw.get("checkout_id")), MAX_ID_LEN),
+        sale_id=_clip(_id(raw.get("sale_id")), MAX_ID_LEN),
         status=_str(raw.get("status")),
         payment_method=_str(raw.get("payment_method")),
         type=_str(raw.get("type")),
