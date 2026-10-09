@@ -101,6 +101,18 @@ PDFs. Os testes ficam de fora por padrão (`--with-tests` envia).
 Variáveis aceitas pelos dois scripts (ou lidas do `secrets.env` local): `VPS_HOST`,
 `VPS_USER`, `SSH_PORT`, `SSH_KEY_PATH`, `APP_DIR`, `API_DOMAIN`, `LETSENCRYPT_EMAIL`.
 
+Para rodar um script **no servidor**, com o mesmo usuário e ambiente dos serviços (mesmas
+variáveis acima):
+
+```bash
+bash deploy/run_remote.sh scripts.reprocessar_carrinhos            # prévia, não grava nada
+bash deploy/run_remote.sh scripts.reprocessar_carrinhos --enviar   # grava; o worker envia
+```
+
+`reprocessar_carrinhos` dá a primeira mensagem aos carrinhos que o bug do código de checkout
+compartilhado (07–09/10/2026) guardou como `ignored` nas últimas 24 h (`--horas N` muda a
+janela). Pula quem já comprou, gerou PIX, pediu SAIR ou já tem carrinho mais novo.
+
 ---
 
 ## 3. Checklist do primeiro dia
