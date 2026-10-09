@@ -32,7 +32,7 @@ from app.models import (
     OrderStatus,
     WebhookEvent,
 )
-from app.phone import normalize_br
+from app.phone import digits_only, normalize_br
 from app.postsale import (
     EVENT_SALE_APPROVED,
     REVERSAL_EVENTS,
@@ -241,8 +241,16 @@ class KirvanoPayload:
         return m == "PIX"
 
     def idempotency_key(self) -> str:
-        """(event, sale_id, created_at) folded into one nullable-safe string."""
-        ident = self.sale_id or self.checkout_id
+        """(event, sale_id, created_at) folded into one nullable-safe string.
+
+        Without a sale (ABANDONED_CART) the checkout code is not enough: Kirvano shares
+        it between customers, so two carts abandoned in the same second would collide.
+        The customer's phone (or e-mail) goes into the key with it.
+        """
+        ident = self.sale_id
+        if not ident:
+            who = digits_only(self.customer.phone_number) or (self.customer.email or "").lower()
+            ident = ":".join(p for p in (self.checkout_id, who) if p) or None
         if not ident:
             digest = hashlib.sha256(
                 json.dumps(self.raw, sort_keys=True, default=str).encode()

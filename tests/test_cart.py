@@ -203,6 +203,79 @@ def test_customer_with_a_pix_in_progress_gets_no_cart_message(
     assert _jobs(session) == []
 
 
+# Kirvano sends ONE checkout_id for many customers (the checkout page's code). In
+# production every cart after the first was matched to that first cart, which had
+# already bought, and all of them were dropped as "ignored".
+SHARED_CHECKOUT = "SHARED01"
+
+
+def test_customers_sharing_a_checkout_code_get_their_own_carts(
+    session, settings, cart_on, frozen_clock
+):
+    first = cart_payload(checkout_id=SHARED_CHECKOUT, phone="5511911110001", email="a@example.com")
+    handle_event(session, first, settings=settings)
+    sale = kirvano_payload(
+        "SALE_APPROVED", sale_id="CARDA001", phone="5511911110001", method="CREDIT_CARD"
+    )
+    sale["checkout_id"] = SHARED_CHECKOUT
+    sale["customer"]["email"] = "a@example.com"
+    handle_event(session, sale, settings=settings)  # the first customer buys
+
+    frozen_clock.advance(minutes=30)
+    results = [
+        handle_event(
+            session,
+            cart_payload(
+                checkout_id=SHARED_CHECKOUT,
+                phone=phone,
+                email=email,
+                created_at=frozen_clock.now,  # same second: must not look like a repeat
+            ),
+            settings=settings,
+        )
+        for phone, email in [("5511922220002", "b@example.com"), ("5511933330003", "c@example.com")]
+    ]
+    assert [(r.outcome, r.reason) for r in results] == [
+        ("processed", "scheduled_1"),
+        ("processed", "scheduled_1"),
+    ]
+    carts = _carts(session)
+    assert [c.status for c in carts] == ["purchased", "open", "open"]
+    assert len({c.id for c in carts}) == 3
+
+
+def test_a_sale_never_closes_another_customers_cart_with_the_same_checkout_code(
+    session, settings, cart_on, frozen_clock
+):
+    handle_event(
+        session,
+        cart_payload(checkout_id=SHARED_CHECKOUT, phone="5511922220002", email="b@example.com"),
+        settings=settings,
+    )
+    sale = kirvano_payload(
+        "SALE_APPROVED", sale_id="CARDA001", phone="5511911110001", method="CREDIT_CARD"
+    )
+    sale["checkout_id"] = SHARED_CHECKOUT
+    sale["customer"]["email"] = "a@example.com"
+    handle_event(session, sale, settings=settings)
+    [cart] = _carts(session)
+    assert cart.status == "open" and cart.recovered is False
+    assert _jobs(session)[0].state == "scheduled"
+
+
+def test_a_card_purchase_reported_before_the_cart_event_blocks_the_message(
+    session, settings, cart_on, frozen_clock
+):
+    """Kirvano can report the abandonment after the customer already paid by card."""
+    sale = kirvano_payload("SALE_APPROVED", sale_id="CARDB001", phone=PHONE, method="CREDIT_CARD")
+    sale["customer"]["email"] = "other@example.com"
+    handle_event(session, sale, settings=settings)
+    late = cart_payload(created_at=DEFAULT_NOW - timedelta(minutes=5))
+    res = handle_event(session, late, settings=settings)
+    assert res.reason == "purchased_after"
+    assert _jobs(session) == []
+
+
 # --- stopping it -------------------------------------------------------------------------
 
 

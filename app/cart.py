@@ -46,6 +46,8 @@ from app.models import (
     JobState,
     Order,
     OrderStatus,
+    PostSale,
+    PostSaleStatus,
     RecoveryJob,
     TemplateStatus,
 )
@@ -163,17 +165,44 @@ def _lock_cart(session: Session, cart_id: int) -> Cart | None:
     ).scalar_one_or_none()
 
 
+def _same_customer(forms: list[str], email: str | None) -> list:
+    """SQL conditions "this cart is that customer's": a phone form or the e-mail."""
+    conds = []
+    if forms:
+        conds += [Cart.phone_e164.in_(forms), Cart.phone_alt.in_(forms)]
+    if email:
+        conds.append(func.lower(Cart.customer_email) == email)
+    return conds
+
+
 def _locate_cart(
-    session: Session, *, checkout_id: str | None, forms: list[str], now: datetime
+    session: Session,
+    *,
+    checkout_id: str | None,
+    forms: list[str],
+    email: str | None,
+    now: datetime,
 ) -> Cart | None:
-    """The cart a new ABANDONED_CART belongs to: same checkout, else same phone recently."""
+    """The cart a new ABANDONED_CART belongs to: same checkout AND same customer, else
+    the same phone's open cart from the last 24 h.
+
+    Kirvano sends the SAME ``checkout_id`` for different customers (it identifies the
+    checkout page, not the visit). Matched on its own, every new cart became a repeat
+    of the first cart of that checkout — in production all of them were dropped as
+    "ignored" behind one customer who had already bought.
+    """
     cart_id: int | None = None
-    if checkout_id:
+    customer = _same_customer(forms, email)
+    if checkout_id and customer:
         # Bounded in time: a checkout code seen again weeks later is a new abandonment,
         # not a repeat of the old one, and deserves its own sequence.
         cart_id = session.execute(
             select(Cart.id)
-            .where(Cart.checkout_id == checkout_id, Cart.abandoned_at >= now - ATTRIBUTION_WINDOW)
+            .where(
+                Cart.checkout_id == checkout_id,
+                Cart.abandoned_at >= now - ATTRIBUTION_WINDOW,
+                or_(*customer),
+            )
             .order_by(Cart.id.desc())
             .limit(1)
         ).scalar_one_or_none()
@@ -220,6 +249,23 @@ def phone_conflict(session: Session, cart: Cart, now: datetime) -> str | None:
             product_name and product_name == cart.product_name
         )
         if status == OrderStatus.PAID.value and same_product:
+            return "already_purchased"
+    # Card and boleto sales never become orders (that table is the PIX flow's), but the
+    # post-sale flow records every approved sale: a purchase there counts the same.
+    sales = session.execute(
+        select(PostSale.paid_at, PostSale.product_name, PostSale.offer_id).where(
+            or_(PostSale.phone_e164.in_(forms), PostSale.phone_alt.in_(forms)),
+            PostSale.paid_at >= cart.abandoned_at - PURCHASE_LOOKBACK,
+            PostSale.status == PostSaleStatus.ACTIVE.value,
+        )
+    ).all()
+    for paid_at, product_name, offer_id in sales:
+        if paid_at >= cart.abandoned_at:
+            return "purchased_after"
+        same_product = (offer_id and offer_id == cart.offer_id) or (
+            product_name and product_name == cart.product_name
+        )
+        if same_product:
             return "already_purchased"
     reminded = session.execute(
         select(
@@ -330,7 +376,8 @@ def handle_abandoned_cart(
     forms = list(normalised.variants) if normalised else []
     abandoned_at = min(payload.created_at or now, now)
 
-    cart = _locate_cart(session, checkout_id=payload.checkout_id, forms=forms, now=now)
+    email = (c.email or "").strip().lower() or None
+    cart = _locate_cart(session, checkout_id=payload.checkout_id, forms=forms, email=email, now=now)
     if cart is not None and cart.status != CartStatus.OPEN.value:
         # A repeat for a checkout that already converted: nothing to recover.
         result.outcome, result.reason, result.cart_id = "ignored", f"cart_{cart.status}", cart.id
@@ -447,12 +494,14 @@ def cancel_cart_jobs_for_phones(
 
 
 def _matching_carts(session: Session, payload: KirvanoPayload, now: datetime) -> list[Cart]:
-    """Locked carts (by id) this sale/PIX belongs to: same sale, checkout, phone or e-mail."""
+    """Locked carts (by id) this sale/PIX belongs to: same sale, phone or e-mail.
+
+    Not the checkout code: Kirvano shares one ``checkout_id`` between customers, so one
+    customer's sale would close (and "recover") everybody else's cart.
+    """
     conds = []
     if payload.sale_id:
         conds.append(Cart.converted_sale_id == payload.sale_id)
-    if payload.checkout_id:
-        conds.append(Cart.checkout_id == payload.checkout_id)
     forms = phone_forms([payload.customer.phone_number])
     if forms:
         conds += [Cart.phone_e164.in_(forms), Cart.phone_alt.in_(forms)]
